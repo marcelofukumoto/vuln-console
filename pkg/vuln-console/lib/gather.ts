@@ -12,6 +12,7 @@ import { agentsApi } from './agents';
 import { podRunScript, podWriteFile, shellQuote } from './exec';
 import type { PodRef } from './exec';
 import { SEED_FILES } from '../seed.generated';
+import type { Board } from '../config/constants';
 
 const ROOT = '/workspace/.vuln-console';
 const POD_USER = '1000:1000';
@@ -19,7 +20,7 @@ const POD_USER = '1000:1000';
 /** How long a gather may take. Two GitHub endpoints and a thousand alerts, so not instant. */
 const GATHER_TIMEOUT_MS = 180000;
 
-export async function refreshSnapshot(): Promise<void> {
+export async function refreshSnapshot(board: Board): Promise<void> {
   const api = agentsApi();
 
   if (!api) {
@@ -51,7 +52,9 @@ export async function refreshSnapshot(): Promise<void> {
     await podWriteFile(target, `${ ROOT }/${ name }`, content, { mode: '644', owner: POD_USER });
   }
 
-  const dir = `${ ROOT }/gather`;
+  // A directory per board, so two refreshes running at once do not write each other's
+  // snapshot.json out from under themselves.
+  const dir = `${ ROOT }/gather-${ board.id }`;
 
   await podRunScript(
     target,
@@ -62,8 +65,14 @@ export async function refreshSnapshot(): Promise<void> {
 
   await podRunScript(
     target,
-    `sh ${ shellQuote(`${ ROOT }/gather.sh`) } ${ shellQuote(dir) }`,
-    'gather the Dependabot alerts',
+    [
+      `sh ${ shellQuote(`${ ROOT }/gather.sh`) }`,
+      shellQuote(dir),
+      shellQuote(board.id),
+      shellQuote(board.repo),
+      shellQuote(board.fork.split('/')[0]),
+    ].join(' '),
+    `gather the Dependabot alerts for ${ board.repo }`,
     GATHER_TIMEOUT_MS,
   );
 }

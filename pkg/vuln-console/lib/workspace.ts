@@ -17,16 +17,16 @@
 // by somebody who is not us, deployed by Fleet with real reconciliation and real teardown, and
 // it is the same App shape the dev extension already uses - so the two are recognisably the
 // same kind of thing rather than two inventions.
-import {
-  BROWSER_PORT, FORK_REPO, UPSTREAM_REPO, WORKSPACE_APP, WORKSPACE_PORT,
-} from '../config/constants';
+import { BROWSER_PORT, WORKSPACE_APP, WORKSPACE_PORT } from '../config/constants';
+import type { Board } from '../config/constants';
 import { MANIFESTS } from '../yaml.generated';
 
 const APP_TYPE = 'appsplus.io.app';
 const APP_INSTANCE_TYPE = 'appsplus.io.appinstance';
 
-/** The label that says which library a workspace belongs to. */
+/** The labels that say which library and which board a workspace belongs to. */
 export const LABEL_LIBRARY = 'vuln-console.rancher.io/library';
+export const LABEL_BOARD = 'vuln-console.rancher.io/board';
 
 /** A minimal view of the Vuex store, so this file does not depend on the dashboard's types. */
 export interface Store {
@@ -45,14 +45,14 @@ export function appsPlusInstalled(store: Store): boolean {
  * a DNS label - and `@scope/name` is neither. The job carries the real library name; this is
  * only an address.
  */
-export function workspaceName(library: string): string {
+export function workspaceName(board: string, library: string): string {
   const slug = library
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
+    .slice(0, 30);
 
-  return `vuln-${ slug || 'fix' }`;
+  return `vuln-${ board }-${ slug || 'fix' }`;
 }
 
 /**
@@ -77,9 +77,12 @@ export function workspaceApp(): Record<string, any> {
       description: 'A rancher/dashboard checkout with its dependencies installed, the dev server running, and a browser beside it — where one Dependabot fix is made and verified. The first start is minutes: a clone, a yarn install and a first compile.',
       // `port` is a number on purpose. apps-plus emits a declared number bare and a declared
       // string quoted, and a Service port that arrives as "8005" is one the apiserver refuses.
+      // The repository and the fork are DEFAULTS here and are overridden per installation: one
+      // App describes what a fix workspace is, and each board's installations point it at their
+      // own repository. Adding a board does not add an App.
       values:      {
-        repo:         UPSTREAM_REPO,
-        fork:         FORK_REPO,
+        repo:         'rancher/dashboard',
+        fork:         'marcelofukumoto/dashboard',
         port:         WORKSPACE_PORT,
         // The dashboard's dev server serves TLS from its own config, so the service proxy has
         // to be told to speak it too - otherwise every "is it up yet" is a 503.
@@ -144,8 +147,8 @@ export async function ensureWorkspaceApp(store: Store): Promise<void> {
  * console this replaces had no such notion and could put two agents on ONE shared checkout,
  * where they clobbered each other's lockfile work.
  */
-export async function ensureWorkspace(store: Store, library: string): Promise<string> {
-  const name = workspaceName(library);
+export async function ensureWorkspace(store: Store, board: Board, library: string): Promise<string> {
+  const name = workspaceName(board.id, library);
   const existing = await store.dispatch('management/find', { type: APP_INSTANCE_TYPE, id: name })
     .catch(() => null);
 
@@ -157,12 +160,18 @@ export async function ensureWorkspace(store: Store, library: string): Promise<st
 
   const instance = await store.dispatch('management/create', {
     type:     APP_INSTANCE_TYPE,
-    metadata: { name, labels: { [LABEL_LIBRARY]: library.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 63) } },
+    metadata: {
+      name,
+      labels: {
+        [LABEL_LIBRARY]: library.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 63),
+        [LABEL_BOARD]:   board.id,
+      },
+    },
     spec:     {
       app:              WORKSPACE_APP,
       namespace:        name,
       targets:          [{ clusterName: 'local' }],
-      values:           {},
+      values:           { repo: board.repo, fork: board.fork },
       provisionCluster: { enabled: false },
     },
   });
@@ -205,8 +214,8 @@ export async function workspaceServing(name: string): Promise<boolean> {
   return resp.status < 500;
 }
 
-export async function deleteWorkspace(store: Store, library: string): Promise<void> {
-  const name = workspaceName(library);
+export async function deleteWorkspace(store: Store, board: string, library: string): Promise<void> {
+  const name = workspaceName(board, library);
   const instance = await store.dispatch('management/find', { type: APP_INSTANCE_TYPE, id: name })
     .catch(() => null);
 

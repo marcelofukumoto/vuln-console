@@ -108,6 +108,8 @@ export type JobPhase = 'Running' | 'Fixed' | 'Done' | 'Failed' | 'Cancelled';
 
 /** One library's run record. Keyed by library, which is what the board groups on. */
 export interface Job {
+  /** Which board this belongs to. Two boards can hold a library of the same name. */
+  board: string;
   library: string;
   phase: JobPhase;
   action: JobAction;

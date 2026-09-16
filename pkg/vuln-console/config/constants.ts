@@ -8,16 +8,51 @@
 /** Where this extension keeps its own state. Created on first use. */
 export const NAMESPACE = 'vuln-console';
 
-/** The repository whose Dependabot alerts the board shows. */
-export const UPSTREAM_REPO = 'rancher/dashboard';
-
 /**
- * The fork fixes are pushed to, and - for now - the repository pull requests are opened
- * against. Pointing both at the fork is deliberate: branches and PRs are made here first so a
- * mistake costs nothing, and only the `prTarget` moves to `rancher/dashboard` later.
+ * One board: a repository whose Dependabot alerts are shown, and the fork its fixes go to.
+ *
+ * A list rather than a constant because the same process serves more than one repository, and
+ * the process is the point - `rancher-ai-ui` is fixed exactly the way `dashboard` is, by the
+ * same prompt in the same kind of workspace. Adding a third is adding an entry here.
+ *
+ * Everything a board owns is namespaced by its `id`: its snapshot, its jobs and its workspaces.
+ * Two boards never share an object, so a fix on one cannot be confused for a fix on the other.
  */
-export const FORK_REPO = 'marcelofukumoto/dashboard';
-export const PR_TARGET_REPO = FORK_REPO;
+export interface Board {
+  id: string;
+  label: string;
+  repo: string;
+  /** Where branches are pushed. */
+  fork: string;
+  /**
+   * Where pull requests are opened.
+   *
+   * The fork, for now. Branches and pull requests are made there first so a mistake costs
+   * nothing; moving a board to its upstream is changing this one field.
+   */
+  prTarget: string;
+}
+
+export const BOARDS: Board[] = [
+  {
+    id:       'dashboard',
+    label:    'Dashboard',
+    repo:     'rancher/dashboard',
+    fork:     'marcelofukumoto/dashboard',
+    prTarget: 'marcelofukumoto/dashboard',
+  },
+  {
+    id:       'rancher-ai-ui',
+    label:    'Rancher AI UI',
+    repo:     'rancher/rancher-ai-ui',
+    fork:     'marcelofukumoto/rancher-ai-ui',
+    prTarget: 'marcelofukumoto/rancher-ai-ui',
+  },
+];
+
+export function boardById(id: string): Board {
+  return BOARDS.find((b) => b.id === id) || BOARDS[0];
+}
 
 /** The Secret holding the GitHub token, and the key inside it. */
 export const SECRET_NAME = 'settings';
@@ -31,9 +66,10 @@ export const GH_TOKEN_KEY = 'gh_token';
 export const STUDIO_NAMESPACE = 'extension-studio';
 export const STUDIO_SECRET = 'settings';
 
-/** ConfigMap names and the label that marks the ones this extension owns. */
+/** ConfigMap names and the labels that mark what this extension owns, and for which board. */
 export const OWNER_LABEL = 'vuln-console.rancher.io/owns';
-export const SNAPSHOT_CONFIGMAP = 'snapshot';
+export const BOARD_LABEL = 'vuln-console.rancher.io/board';
+export const SNAPSHOT_PREFIX = 'snapshot-';
 export const REVIEWERS_CONFIGMAP = 'reviewers';
 export const JOB_PREFIX = 'job-';
 

@@ -13,13 +13,14 @@
 import { computed } from 'vue';
 import RcButton from '@components/RcButton/RcButton.vue';
 import { RcStatusBadge } from '@components/Pill';
-import { FORK_REPO } from '../config/constants';
 import { isStalled } from '../lib/run';
 import type { Job, JobAction, VulnGroup } from '../types';
 
 const props = defineProps<{
   row: VulnGroup;
   job: Job | null;
+  /** Where this board's branches are pushed, so the branch pill links to the right fork. */
+  fork: string;
   /** True while this row's own run is going. */
   busy: boolean;
 }>();
@@ -76,7 +77,7 @@ const published = computed(() => !!video.value && /^https?:\/\//.test(video.valu
  */
 const unfixable = computed(() => props.row.unfixable);
 
-const branchUrl = computed(() => (branch.value ? `https://github.com/${ FORK_REPO }/tree/${ branch.value }` : null));
+const branchUrl = computed(() => (branch.value ? `https://github.com/${ props.fork }/tree/${ branch.value }` : null));
 </script>
 
 <template>

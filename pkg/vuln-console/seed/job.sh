@@ -9,11 +9,12 @@
 # early and a pull request later does not erase the branch - which is the failure mode of every
 # "write the whole file" version of this.
 #
-# usage: job.sh <library> phase=Done branch=... prNumber=123 message="..."
+# usage: job.sh <board> <library> phase=Done branch=... prNumber=123 message="..."
 set -e
 
-LIBRARY=${1:?job.sh needs the library}
-shift
+BOARD=${1:?job.sh needs the board}
+LIBRARY=${2:?job.sh needs the library}
+shift 2
 
 NS=vuln-console
 
@@ -22,14 +23,14 @@ kube() { KUBECONFIG=/dev/null kubectl "$@"; }
 # The object name, by the same rule the extension uses: lowercased, anything that is not a
 # letter or a digit becomes a hyphen. `@scope/name` is not a legal object name and this is only
 # an address - the record keeps the real library name in a field.
-NAME=job-$(printf '%s' "$LIBRARY" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\{1,\}/-/g; s/^-*//; s/-*$//' | cut -c1-50)
+NAME=job-$BOARD-$(printf '%s' "$LIBRARY" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\{1,\}/-/g; s/^-*//; s/-*$//' | cut -c1-40)
 
 CURRENT=$(kube get configmap "$NAME" -n "$NS" -o "jsonpath={.data.job\.json}" 2>/dev/null || true)
 
 # Read the current record, apply the assignments, write it back. Through node because the values
 # are arbitrary text - a message can contain a quote, a URL contains slashes - and sed would
 # mangle both.
-UPDATED=$(CURRENT="$CURRENT" LIBRARY="$LIBRARY" node -e '
+UPDATED=$(CURRENT="$CURRENT" LIBRARY="$LIBRARY" BOARD="$BOARD" node -e '
   const assignments = process.argv.slice(1);
   let job = {};
 
@@ -40,6 +41,7 @@ UPDATED=$(CURRENT="$CURRENT" LIBRARY="$LIBRARY" node -e '
   }
 
   job.library = job.library || process.env.LIBRARY;
+  job.board = job.board || process.env.BOARD;
 
   // Numbers stay numbers and the empty string clears a field, so `prNumber=` is how a run says
   // "there is no pull request" without writing the string "null" into the board.
@@ -85,10 +87,13 @@ kube create configmap "$NAME" \
     process.stdin.on("end", () => {
       const cm = JSON.parse(raw);
 
-      cm.metadata.labels = { "vuln-console.rancher.io/owns": "true" };
+      cm.metadata.labels = {
+        "vuln-console.rancher.io/owns": "true",
+        "vuln-console.rancher.io/board": process.argv[1],
+      };
       process.stdout.write(JSON.stringify(cm));
     });
-  ' |
+  ' "$BOARD" |
   kube apply --server-side --force-conflicts -f - >/dev/null
 
 rm -f /tmp/job-$$.json

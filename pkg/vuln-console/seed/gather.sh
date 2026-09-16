@@ -10,10 +10,13 @@
 # written through the exec socket is a token the browser held; read here, with the pod's own
 # ServiceAccount, at the moment it is needed, the browser never has it at all.
 #
-# usage: gather.sh <work-dir>
+# usage: gather.sh <work-dir> <board-id> <repo> <fork-owner>
 set -e
 
 DIR=${1:?gather.sh needs a working directory}
+BOARD=${2:?gather.sh needs a board id}
+REPO=${3:?gather.sh needs a repository}
+FORK_OWNER=${4:?gather.sh needs a fork owner}
 SEED=$(dirname "$0")
 
 [ -d "$DIR" ] || { echo "gather.sh: no such directory: $DIR" >&2; exit 2; }
@@ -62,8 +65,8 @@ GH_TOKEN="$GH_TOKEN" node -e \
   'require("fs").writeFileSync(process.argv[1], JSON.stringify({ GH_TOKEN: process.env.GH_TOKEN }))' \
   "$CREDS"
 
-CREDS_FILE="$CREDS" OUT="$SNAPSHOT" VULN_REPO="${VULN_REPO:-rancher/dashboard}" \
-  FORK_OWNER="${FORK_OWNER:-marcelofukumoto}" node "$SEED/gather.mjs"
+CREDS_FILE="$CREDS" OUT="$SNAPSHOT" VULN_REPO="$REPO" FORK_OWNER="$FORK_OWNER" \
+  node "$SEED/gather.mjs"
 
 cleanup
 
@@ -84,7 +87,7 @@ kube get namespace "$NS" >/dev/null 2>&1 || kube create namespace "$NS" >/dev/nu
 # outright ("metadata.annotations: Too long"). Server-side apply keeps its bookkeeping in
 # managedFields instead, where there is no such limit.
 
-kube create configmap snapshot \
+kube create configmap "snapshot-$BOARD" \
   --namespace "$NS" \
   --from-file=snapshot.json="$SNAPSHOT" \
   --dry-run=client -o json |
@@ -95,10 +98,13 @@ kube create configmap snapshot \
     process.stdin.on("end", () => {
       const cm = JSON.parse(raw);
 
-      cm.metadata.labels = { "vuln-console.rancher.io/owns": "true" };
+      cm.metadata.labels = {
+        "vuln-console.rancher.io/owns": "true",
+        "vuln-console.rancher.io/board": process.argv[1],
+      };
       process.stdout.write(JSON.stringify(cm));
     });
-  ' |
+  ' "$BOARD" |
   kube apply --server-side --force-conflicts -f - >/dev/null
 
-echo "gather.sh: published a $((SIZE / 1024)) KiB snapshot"
+echo "gather.sh: published a $((SIZE / 1024)) KiB snapshot for $BOARD ($REPO)"

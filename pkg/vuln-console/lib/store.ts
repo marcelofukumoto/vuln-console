@@ -10,13 +10,17 @@
 // Three kinds of object, found by LABEL rather than by name pattern, so nothing here guesses at
 // what a ConfigMap is from what it is called:
 //
-//   snapshot      one object, the last gather. Rewritten whole each time.
-//   job-<library> one per library that has been worked on. Small, and written by whoever is
-//                 acting - separate objects so two runs on two libraries never write the same
-//                 object and lose each other's fields.
-//   reviewers     one object, the logins to request on every pull request we open.
+//   snapshot-<board>       one per board, the last gather. Rewritten whole each time.
+//   job-<board>-<library>  one per library worked on, per board. Small, and written by whoever
+//                          is acting - separate objects so two runs never write the same object
+//                          and lose each other's fields.
+//   reviewers              one object, the logins to request on every pull request we open.
+//
+// Everything except the reviewers is keyed by BOARD as well as by name, and carries the board
+// as a label. Two boards fixing a library with the same name - which is the normal case, since
+// both repositories are npm projects - must never read as one.
 import {
-  JOB_PREFIX, NAMESPACE, OWNER_LABEL, REVIEWERS_CONFIGMAP, SNAPSHOT_CONFIGMAP,
+  BOARD_LABEL, JOB_PREFIX, NAMESPACE, OWNER_LABEL, REVIEWERS_CONFIGMAP, SNAPSHOT_PREFIX,
 } from '../config/constants';
 import { STEVE_BASE, rancherFetch } from './rancher';
 import type { Job, Reviewers, Snapshot } from '../types';
@@ -115,8 +119,12 @@ async function readJson<T>(name: string, key: string): Promise<T | null> {
 
 // ── The gather ─────────────────────────────────────────────────────────────────────────────
 
-export function readSnapshot(): Promise<Snapshot | null> {
-  return readJson<Snapshot>(SNAPSHOT_CONFIGMAP, 'snapshot.json');
+export function snapshotName(board: string): string {
+  return `${ SNAPSHOT_PREFIX }${ board }`;
+}
+
+export function readSnapshot(board: string): Promise<Snapshot | null> {
+  return readJson<Snapshot>(snapshotName(board), 'snapshot.json');
 }
 
 /**
@@ -128,13 +136,17 @@ export function readSnapshot(): Promise<Snapshot | null> {
  * sides of the wire means neither a broken script nor a broken caller can erase a good
  * snapshot.
  */
-export async function writeSnapshot(snapshot: Snapshot): Promise<void> {
+export async function writeSnapshot(board: string, snapshot: Snapshot): Promise<void> {
   if (!snapshot?.alerts?.length) {
     throw new Error('refusing to store a gather with no alerts in it - the previous one is kept');
   }
 
   await ensureNamespace();
-  await writeConfigMap(SNAPSHOT_CONFIGMAP, { 'snapshot.json': JSON.stringify(snapshot) }, {});
+  await writeConfigMap(
+    snapshotName(board),
+    { 'snapshot.json': JSON.stringify(snapshot) },
+    { [BOARD_LABEL]: board },
+  );
 }
 
 // ── Jobs ───────────────────────────────────────────────────────────────────────────────────
@@ -147,18 +159,20 @@ export async function writeSnapshot(snapshot: Snapshot): Promise<void> {
  * only in the sense that the job carries its own `library` field - the name is an address, not
  * the record.
  */
-export function jobName(library: string): string {
-  const slug = library
+export function slug(value: string): string {
+  return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50);
-
-  return `${ JOB_PREFIX }${ slug || 'unnamed' }`;
+    .replace(/^-+|-+$/g, '');
 }
 
-export async function readJobs(): Promise<Job[]> {
-  const list = await steve(`/configmaps?labelSelector=${ encodeURIComponent(`${ OWNER_LABEL }=true`) }`)
+export function jobName(board: string, library: string): string {
+  return `${ JOB_PREFIX }${ board }-${ slug(library).slice(0, 40) || 'unnamed' }`;
+}
+
+export async function readJobs(board: string): Promise<Job[]> {
+  const selector = `${ OWNER_LABEL }=true,${ BOARD_LABEL }=${ board }`;
+  const list = await steve(`/configmaps?labelSelector=${ encodeURIComponent(selector) }`)
     .catch(() => null);
 
   return (list?.data || [])
@@ -175,11 +189,15 @@ export async function readJobs(): Promise<Job[]> {
 
 export async function writeJob(job: Job): Promise<void> {
   await ensureNamespace();
-  await writeConfigMap(jobName(job.library), { 'job.json': JSON.stringify(job) }, {});
+  await writeConfigMap(
+    jobName(job.board, job.library),
+    { 'job.json': JSON.stringify(job) },
+    { [BOARD_LABEL]: job.board },
+  );
 }
 
-export async function deleteJob(library: string): Promise<void> {
-  await steve(configMapPath(jobName(library)), { method: 'DELETE' }).catch(() => null);
+export async function deleteJob(board: string, library: string): Promise<void> {
+  await steve(configMapPath(jobName(board, library)), { method: 'DELETE' }).catch(() => null);
 }
 
 // ── Reviewers ──────────────────────────────────────────────────────────────────────────────

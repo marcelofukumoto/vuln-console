@@ -27,7 +27,8 @@ import { readJobs, writeJob } from './store';
 import { ensureWorkspace, workspaceName } from './workspace';
 import type { Store } from './workspace';
 import { SEED_FILES } from '../seed.generated';
-import { FORK_REPO, PR_TARGET_REPO, STALE_RUN_MS, UPSTREAM_REPO, WORKSPACES_ROOT } from '../config/constants';
+import { STALE_RUN_MS, WORKSPACES_ROOT } from '../config/constants';
+import type { Board } from '../config/constants';
 import type { Job, JobAction, VulnGroup } from '../types';
 
 /** Where this extension keeps its scripts inside the agents pod. */
@@ -106,13 +107,13 @@ function shellWrapper(workspace: string): string {
  *
  * It carries no credentials. The workspace resolves its own.
  */
-function openingPrompt(action: JobAction, library: string, group: VulnGroup | null, job: Job): string {
+function openingPrompt(action: JobAction, board: Board, library: string, group: VulnGroup | null, job: Job): string {
   const alerts = (group?.vulns || [])
     .filter((v) => v.state === 'open')
     .map((v) => `#${ v.id } (${ v.severity }${ v.patched ? `, needs ${ v.patched }` : ', no fix published' }) in ${ v.manifest }`);
 
   return [
-    `${ VERBS[action] } the dependency **${ library }** in ${ UPSTREAM_REPO }.`,
+    `${ VERBS[action] } the dependency **${ library }** in ${ board.repo }.`,
     '',
     `Read ${ ROOT }/${ PROMPTS[action] } IN FULL before you do anything. It is the specification`,
     'for this action and it is authoritative.',
@@ -121,8 +122,9 @@ function openingPrompt(action: JobAction, library: string, group: VulnGroup | nu
     `  library        ${ library }`,
     `  workspace      ${ job.workspace } (your commands already run inside it)`,
     `  checkout       ${ WORKSPACES_ROOT }/${ job.workspace }/dashboard`,
-    `  push to        ${ FORK_REPO } (remote "fork")`,
-    `  pull requests  ${ PR_TARGET_REPO }`,
+    `  repository     ${ board.repo }`,
+    `  push to        ${ board.fork } (remote "fork")`,
+    `  pull requests  ${ board.prTarget }`,
     job.branch ? `  branch         ${ job.branch }` : '',
     job.prNumber ? `  pull request   ${ job.prNumber }` : '',
     alerts.length ? `  open alerts    ${ alerts.join('; ') }` : '',
@@ -130,7 +132,7 @@ function openingPrompt(action: JobAction, library: string, group: VulnGroup | nu
     'Enumerate the affected manifests from the LIVE alerts, not from the list above - this board',
     'can be hours old and a missed lockfile is the most common thing a reviewer catches.',
     '',
-    `Record what you did by writing the job: ${ ROOT }/job.sh ${ shellQuote(library) } <field>=<value> ...`,
+    `Record what you did by writing the job: ${ ROOT }/job.sh ${ board.id } ${ shellQuote(library) } <field>=<value> ...`,
     'Call it when you finish and whenever something durable happens (a branch, a preview, a pull',
     'request). If you cannot finish, record why:',
     `  ${ ROOT }/job.sh ${ shellQuote(library) } phase=Failed message="one line saying what went wrong"`,
@@ -168,6 +170,7 @@ async function writeSeed(target: PodRef, workspace: string): Promise<void> {
 
 export interface StartOptions {
   store: Store;
+  board: Board;
   library: string;
   action: JobAction;
   group?: VulnGroup | null;
@@ -184,14 +187,14 @@ export interface StartOptions {
  * be fixed at once; two runs on ONE library still cannot.
  */
 export async function startAction(options: StartOptions): Promise<Job> {
-  const { store, library, action, group = null, by } = options;
+  const { store, board, library, action, group = null, by } = options;
   const api = agentsApi();
 
   if (!api) {
     throw new Error('The Agents extension is not available on this page, so there is no agent to do the work.');
   }
 
-  const running = (await readJobs()).find((j) => j.library === library && j.phase === 'Running');
+  const running = (await readJobs(board.id)).find((j) => j.library === library && j.phase === 'Running');
 
   if (running && Date.now() - running.updatedAt < STALE_RUN_MS) {
     throw new Error(`${ library } already has a run going. Stop it first, or wait for it to finish.`);
@@ -203,9 +206,10 @@ export async function startAction(options: StartOptions): Promise<Job> {
     throw new Error('The agent pod is not running, so there is nowhere to do the work.');
   }
 
-  const previous = (await readJobs()).find((j) => j.library === library);
+  const previous = (await readJobs(board.id)).find((j) => j.library === library);
   const now = Date.now();
   const job: Job = {
+    board: board.id,
     library,
     phase:      'Running',
     action,
@@ -213,7 +217,7 @@ export async function startAction(options: StartOptions): Promise<Job> {
     startedAt:  now,
     updatedAt:  now,
     sessionId:  null,
-    workspace:  workspaceName(library),
+    workspace:  workspaceName(board.id, library),
     // What an earlier run already achieved is carried forward: Create PR needs the branch the
     // fix made, and Address comments needs the pull request.
     branch:     previous?.branch || null,
@@ -230,7 +234,7 @@ export async function startAction(options: StartOptions): Promise<Job> {
   await writeJob(job);
 
   try {
-    const workspace = await ensureWorkspace(store, library);
+    const workspace = await ensureWorkspace(store, board, library);
     const target = agentTarget(pod);
 
     await writeSeed(target, workspace);
@@ -238,7 +242,7 @@ export async function startAction(options: StartOptions): Promise<Job> {
     const session = await api.agent.startInProject(
       agentProject(`${ workspace }-${ action }-${ now }`),
       `${ VERBS[action] } ${ library }`,
-      openingPrompt(action, library, group, { ...job, workspace }),
+      openingPrompt(action, board, library, group, { ...job, workspace }),
     );
 
     const started: Job = { ...job, workspace, sessionId: session, updatedAt: Date.now() };
