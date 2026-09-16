@@ -70,6 +70,19 @@ export interface Snapshot {
   dependabotPrs: PullRequest[];
   /** Our pull requests on the target repository, open and recently merged. */
   ourPrs: PullRequest[];
+
+  /** The package most of this repository's tree comes from, when it has one. */
+  ownerPackage?: string;
+  /** The version of it this repository is pinned to, for the row's explanation. */
+  ownerVersion?: string;
+  /**
+   * Libraries that reach the tree ONLY through the owner package.
+   *
+   * Worked out by walking the lockfile from each direct dependency: a library reachable from the
+   * owner and from nothing else is one this repository cannot bump on its own terms. Anything
+   * reachable another way too is left alone, because a fix here would genuinely clear it.
+   */
+  ownerOnly?: string[];
 }
 
 /** One row of the board: a library, its alerts, and the pull request tied to them. */
@@ -80,6 +93,8 @@ export interface VulnGroup {
   vulns: Alert[];
   /** True when every alert lacks a patched version - there is nothing to bump to. */
   unfixable: boolean;
+  /** True when this library is only in the tree because of the owner package. */
+  ownerOnly: boolean;
 }
 
 export interface Ledger {

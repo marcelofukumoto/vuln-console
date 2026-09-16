@@ -16,6 +16,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const REPO = process.env.VULN_REPO || 'rancher/dashboard';
 const FORK_OWNER = process.env.FORK_OWNER || 'marcelofukumoto';
+
+/**
+ * The package this repository gets most of its tree from, if it has one.
+ *
+ * Empty for a repository that is its own tree. Set, it turns on the lockfile walk below.
+ */
+const OWNER_PACKAGE = process.env.OWNER_PACKAGE || '';
 const OUT = process.env.OUT || './snapshot.json';
 const API = process.env.GITHUB_API || 'https://api.github.com';
 
@@ -281,9 +288,173 @@ async function fetchDependabotPulls() {
   return open.map(normalisePr).filter((p) => p.author === 'dependabot[bot]');
 }
 
+// ── Who owns a vulnerable library ──────────────────────────────────────────────────────────
+
+/**
+ * Parse a yarn v1 lockfile into `spec -> { version, deps }`.
+ *
+ * The keys are exactly the `name@range` specs a package asks for, which is what makes the walk
+ * below simple: a dependency's declared range IS the key of the entry that satisfies it, so
+ * nothing has to resolve semver.
+ */
+function parseLock(text) {
+  const entries = new Map();
+  let specs = null;
+  let version = '';
+  let deps = [];
+  let inDeps = false;
+
+  const flush = () => {
+    if (specs) {
+      for (const spec of specs) {
+        entries.set(spec, { version, deps });
+      }
+    }
+
+    specs = null;
+    version = '';
+    deps = [];
+    inDeps = false;
+  };
+
+  for (const raw of text.split('\n')) {
+    if (!raw.trim() || raw.startsWith('#')) {
+      continue;
+    }
+
+    const indent = raw.length - raw.trimStart().length;
+    const line = raw.trim();
+
+    if (indent === 0) {
+      flush();
+      specs = line.replace(/:$/, '').split(',').map((part) => part.trim().replace(/^"|"$/g, ''));
+      continue;
+    }
+
+    if (indent === 2) {
+      inDeps = /^(dependencies|optionalDependencies):$/.test(line);
+
+      const found = /^version "?([^"]+)"?$/.exec(line);
+
+      if (found) {
+        version = found[1];
+      }
+      continue;
+    }
+
+    if (indent >= 4 && inDeps) {
+      const found = /^"?(@?[^"\s]+)"?\s+"?([^"]+)"?$/.exec(line);
+
+      if (found) {
+        deps.push(`${ found[1] }@${ found[2] }`);
+      }
+    }
+  }
+
+  flush();
+
+  return entries;
+}
+
+function reachable(entries, roots) {
+  const seen = new Set();
+  const queue = [...roots];
+
+  while (queue.length) {
+    const spec = queue.pop();
+
+    if (seen.has(spec)) {
+      continue;
+    }
+
+    seen.add(spec);
+
+    const entry = entries.get(spec);
+
+    if (entry) {
+      queue.push(...entry.deps);
+    }
+  }
+
+  return seen;
+}
+
+/** Package names out of a set of `name@range` specs. */
+function namesOf(specs) {
+  const names = new Set();
+
+  for (const spec of specs) {
+    const at = spec.lastIndexOf('@');
+
+    if (at > 0) {
+      names.add(spec.slice(0, at));
+    }
+  }
+
+  return names;
+}
+
+async function repoFile(path) {
+  const resp = await fetch(`${ API }/repos/${ REPO }/contents/${ path }`, {
+    headers: { ...HEADERS, Accept: 'application/vnd.github.raw' },
+  });
+
+  if (!resp.ok) {
+    throw new Error(`reading ${ path }: HTTP ${ resp.status }`);
+  }
+
+  return resp.text();
+}
+
+/**
+ * Which vulnerable libraries are in the tree ONLY because of the owner package.
+ *
+ * Walked from the lockfile rather than guessed from the alert's `relationship`, because every
+ * alert on a repository like this one is `transitive` - that field says the library is not a
+ * direct dependency, not who pulled it in. rancher-ai-ui's `extract-zip` and `tmp` are
+ * transitive too, and they come from Cypress and Jest; calling them shell's would be wrong in a
+ * way somebody would only discover by trying to fix one.
+ */
+async function ownedLibraries() {
+  if (!OWNER_PACKAGE) {
+    return { ownerOnly: [], ownerVersion: '' };
+  }
+
+  const [manifest, lock] = await Promise.all([repoFile('package.json'), repoFile('yarn.lock')]);
+  const pkg = JSON.parse(manifest);
+  const direct = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  const entries = parseLock(lock);
+
+  const ownerRoots = [];
+  const otherRoots = [];
+
+  for (const [name, range] of Object.entries(direct)) {
+    (name === OWNER_PACKAGE ? ownerRoots : otherRoots).push(`${ name }@${ range }`);
+  }
+
+  if (!ownerRoots.length) {
+    return { ownerOnly: [], ownerVersion: '' };
+  }
+
+  const viaOwner = namesOf(reachable(entries, ownerRoots));
+  const viaOther = namesOf(reachable(entries, otherRoots));
+  const ownerOnly = [...viaOwner].filter((name) => !viaOther.has(name)).sort();
+
+  return { ownerOnly, ownerVersion: entries.get(ownerRoots[0])?.version || '' };
+}
+
 async function main() {
-  const [alerts, dependabotPrs, ourPrs] = await Promise.all([
-    fetchAlerts(), fetchDependabotPulls(), fetchOurPulls(),
+  const [alerts, dependabotPrs, ourPrs, owned] = await Promise.all([
+    fetchAlerts(),
+    fetchDependabotPulls(),
+    fetchOurPulls(),
+    // Never fatal: a board that cannot read its own lockfile is a board with no owner
+    // information, which is the same board it was before this existed - not a failed gather.
+    ownedLibraries().catch((e) => {
+      process.stderr.write(`gather: could not work out what ${ OWNER_PACKAGE } owns (${ e?.message || e })\n`);
+
+      return { ownerOnly: [], ownerVersion: '' };
+    }),
   ]);
 
   // A transient failure must never be written as an empty snapshot. The console this replaces
@@ -295,20 +466,32 @@ async function main() {
     fail('no alerts came back at all. Refusing to write a snapshot that would blank the board.');
   }
 
+  // Only the vulnerable libraries are worth storing, not the whole reachable set - the set is
+  // thousands of names and the board only ever asks about the ones it draws.
+  const vulnerable = new Set(alerts.map((a) => a.library));
   const snapshot = {
     gatheredAt: new Date().toISOString(),
     repo:       REPO,
     alerts,
     dependabotPrs,
     ourPrs,
+    ...(OWNER_PACKAGE ? {
+      ownerPackage: OWNER_PACKAGE,
+      ownerVersion: owned.ownerVersion,
+      ownerOnly:    owned.ownerOnly.filter((name) => vulnerable.has(name)),
+    } : {}),
   };
 
   writeFileSync(OUT, JSON.stringify(snapshot));
 
   const open = alerts.filter((a) => a.state === 'open').length;
 
+  const owns = snapshot.ownerOnly?.length
+    ? `, ${ snapshot.ownerOnly.length } only via ${ OWNER_PACKAGE } ${ snapshot.ownerVersion }`
+    : '';
+
   process.stderr.write(
-    `gather: ${ alerts.length } alerts (${ open } open), ${ dependabotPrs.length } Dependabot pull requests, ${ ourPrs.length } of ours -> ${ OUT }\n`,
+    `gather: ${ alerts.length } alerts (${ open } open), ${ dependabotPrs.length } Dependabot pull requests, ${ ourPrs.length } of ours${ owns } -> ${ OUT }\n`,
   );
 }
 

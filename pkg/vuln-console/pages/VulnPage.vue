@@ -189,7 +189,7 @@ async function fixWorst(): Promise<void> {
   }
 
   const candidate = (boardRows.value[activeBoard.value] || [])
-    .filter((r: any) => !r.unfixable && !r.job?.branch && r.job?.phase !== 'Running')
+    .filter((r: any) => !r.unfixable && !r.ownerOnly && !r.job?.branch && r.job?.phase !== 'Running')
     .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))[0];
 
   if (!candidate) {

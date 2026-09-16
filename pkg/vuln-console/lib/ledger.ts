@@ -200,7 +200,7 @@ function attribute(alert: Alert, input: LedgerInput, ourPrs: PullRequest[]): Pul
   return null;
 }
 
-function group(rows: { alert: Alert; pr: PullRequest | null }[]): VulnGroup[] {
+function group(rows: { alert: Alert; pr: PullRequest | null }[], ownerOnly: Set<string>): VulnGroup[] {
   const byLibrary = new Map<string, { alert: Alert; pr: PullRequest | null }[]>();
 
   for (const row of rows) {
@@ -227,6 +227,7 @@ function group(rows: { alert: Alert; pr: PullRequest | null }[]): VulnGroup[] {
       pr:        members.map((m) => m.pr).find((pr) => pr !== null) || null,
       vulns,
       unfixable: vulns.length > 0 && vulns.every((v) => !v.patched),
+      ownerOnly: ownerOnly.has(library),
     });
   }
 
@@ -242,10 +243,11 @@ export function buildLedger(input: LedgerInput): Ledger {
   const openPrOpen = rows.filter((r) => r.alert.state === 'open' && r.pr?.status === 'open');
   const prMerged = rows.filter((r) => r.alert.state !== 'open' && r.pr?.status === 'merged');
 
+  const ownerOnly = new Set(snapshot.ownerOnly || []);
   const lists = {
-    openNoPr:   group(openNoPr),
-    openPrOpen: group(openPrOpen),
-    prMerged:   group(prMerged),
+    openNoPr:   group(openNoPr, ownerOnly),
+    openPrOpen: group(openPrOpen, ownerOnly),
+    prMerged:   group(prMerged, ownerOnly),
   };
 
   // Counts are ALERTS, not rows. A library with four advisories is one row and four

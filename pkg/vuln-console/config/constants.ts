@@ -31,6 +31,20 @@ export interface Board {
    * nothing; moving a board to its upstream is changing this one field.
    */
   prTarget: string;
+
+  /**
+   * The package this repository gets most of its tree from, if it has one.
+   *
+   * `rancher-ai-ui` has exactly one runtime dependency - `@rancher/shell`, pinned exact - and
+   * everything else is dev tooling. So most of its vulnerabilities are not its own: they are
+   * shell's, seen from here, and the fix for them is a shell bump rather than a lockfile edit in
+   * this repository.
+   *
+   * When this is set the gather works out which vulnerable libraries reach the tree ONLY through
+   * it, and the board offers no Fix for those - it says where the fix belongs instead. A
+   * repository that IS the shell (dashboard) has no owner and every row is its own to fix.
+   */
+  ownerPackage?: string;
 }
 
 export const BOARDS: Board[] = [
@@ -42,11 +56,12 @@ export const BOARDS: Board[] = [
     prTarget: 'marcelofukumoto/dashboard',
   },
   {
-    id:       'rancher-ai-ui',
-    label:    'Rancher AI UI',
-    repo:     'rancher/rancher-ai-ui',
-    fork:     'marcelofukumoto/rancher-ai-ui',
-    prTarget: 'marcelofukumoto/rancher-ai-ui',
+    id:           'rancher-ai-ui',
+    label:        'Rancher AI UI',
+    repo:         'rancher/rancher-ai-ui',
+    fork:         'marcelofukumoto/rancher-ai-ui',
+    prTarget:     'marcelofukumoto/rancher-ai-ui',
+    ownerPackage: '@rancher/shell',
   },
 ];
 
