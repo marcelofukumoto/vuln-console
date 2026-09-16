@@ -24,6 +24,7 @@ import { agentProject, agentsApi } from './agents';
 import { podExec, podRunScript, podWriteFile, shellQuote } from './exec';
 import type { PodRef } from './exec';
 import { readJobs, writeJob } from './store';
+import { tokenKey } from './credentials';
 import { ensureWorkspace, workspaceName } from './workspace';
 import type { Store } from './workspace';
 import { SEED_FILES } from '../seed.generated';
@@ -187,6 +188,8 @@ export interface StartOptions {
   board: Board;
   /** The account the stored token belongs to, from the gather. Decides the fork. */
   tokenLogin: string;
+  /** Who pressed the button, as Rancher knows them. Decides whose token is used. */
+  principalId: string;
   library: string;
   action: JobAction;
   group?: VulnGroup | null;
@@ -203,7 +206,7 @@ export interface StartOptions {
  * be fixed at once; two runs on ONE library still cannot.
  */
 export async function startAction(options: StartOptions): Promise<Job> {
-  const { store, board, tokenLogin, library, action, group = null, by } = options;
+  const { store, board, tokenLogin, principalId, library, action, group = null, by } = options;
   const fork = forkFor(board, tokenLogin);
   const prTarget = prTargetFor(board, tokenLogin);
 
@@ -272,6 +275,7 @@ export async function startAction(options: StartOptions): Promise<Job> {
         shellQuote(workspace),
         shellQuote(board.repo),
         shellQuote(fork),
+        shellQuote(tokenKey(principalId)),
       ].join(' '),
       `prepare the workspace for ${ board.repo }`,
       300000,

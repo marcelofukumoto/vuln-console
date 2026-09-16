@@ -20,6 +20,8 @@ import type { CredentialStatus } from '../lib/credentials';
 
 const props = defineProps<{
   status: CredentialStatus;
+  /** Whose token this is. Stored per person, so the dialog is about yours and nobody else's. */
+  principalId: string;
   /** True when this opened because a run could not start without it. */
   blocking?: boolean;
   busy?: boolean;
@@ -35,8 +37,7 @@ const showGithub = ref(false);
 const saving = ref(false);
 const error = ref('');
 
-const ghStored = computed(() => props.status.gh !== 'none');
-const borrowed = computed(() => props.status.gh === 'studio');
+const ghStored = computed(() => props.status.stored);
 
 /** Nothing typed and nothing missing means there is nothing to do but carry on. */
 const ready = computed(() => ghStored.value || !!github.value.trim());
@@ -50,7 +51,7 @@ async function save() {
   error.value = '';
 
   try {
-    await saveCredentials(github.value.trim() ? { ghToken: github.value.trim() } : {});
+    await saveCredentials(props.principalId, github.value.trim());
     github.value = '';
     emit('saved');
   } catch (e: any) {
@@ -65,7 +66,7 @@ async function clear() {
   error.value = '';
 
   try {
-    await saveCredentials({ ghToken: '' });
+    await saveCredentials(props.principalId, '');
     emit('saved');
   } catch (e: any) {
     error.value = e?.message || String(e);
@@ -90,13 +91,13 @@ async function clear() {
 
       <p class="creds__lede">
         <template v-if="blocking">
-          The board is read from <code>rancher/dashboard</code>'s Dependabot alerts, and a fix
-          pushes a branch to the fork — so it needs a GitHub token. It is stored once — you will
-          not be asked again.
+          A fix pushes a branch and opens a pull request, and both are done by <em>you</em> — so
+          this needs your own GitHub token. It is stored once — you will not be asked again.
         </template>
         <template v-else>
-          Stored in a Secret and read by the pod that needs it. It never comes back out to this
-          page, so a stored one can be replaced but not shown.
+          Yours, not the installation's: a fix pushes to your fork and the pull request is
+          authored by you. Stored in a Secret and read by the pod that needs it — it never comes
+          back out to this page, so a stored one can be replaced but not shown.
         </template>
       </p>
 
@@ -108,7 +109,7 @@ async function clear() {
         <span class="creds__label">
           GitHub token
           <span class="creds__state" :class="{ 'is-set': ghStored }">
-            {{ borrowed ? 'From Extension Studio' : ghStored ? 'Stored' : 'Not set' }}
+            {{ ghStored ? 'Stored' : 'Not set' }}
           </span>
         </span>
         <span class="creds__hint">
@@ -116,11 +117,7 @@ async function clear() {
           <code>repo</code> and <code>security_events</code>, or a fine-grained token with
           <em>Dependabot alerts (read)</em> plus <em>Contents</em> and <em>Pull requests</em>
           (read and write) on the fork.
-          <template v-if="borrowed">
-            Extension Studio already has one and this borrows it; setting one here uses that
-            instead.
-          </template>
-          <template v-else-if="ghStored"> Leave blank to keep the stored one.</template>
+          <template v-if="ghStored"> Leave blank to keep the stored one.</template>
         </span>
         <span class="creds__input">
           <input
@@ -136,15 +133,16 @@ async function clear() {
             <i class="icon" :class="showGithub ? 'icon-hide' : 'icon-show'" />
           </button>
         </span>
-        <button v-if="status.gh === 'ours'" type="button" class="creds__clear" :disabled="saving" @click="clear()">
+        <button v-if="ghStored" type="button" class="creds__clear" :disabled="saving" @click="clear()">
           Remove the stored token
         </button>
       </label>
 
       <Banner color="info" class="creds__note">
-        Written straight into the Secret and never read back by this page — replacing it is
-        possible, seeing it is not. The pod reads it with its own ServiceAccount at the moment it
-        is needed.
+        Written straight into the Secret under a key of your own and never read back by this
+        page — replacing it is possible, seeing it is not. Saving touches your key alone, so
+        nobody else's token is read or rewritten. The pod reads it with its own ServiceAccount at
+        the moment it is needed.
       </Banner>
 
       <div class="creds__actions">

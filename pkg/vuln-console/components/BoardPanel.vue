@@ -48,6 +48,39 @@ const activeRuns = computed(() => jobs.value
   .filter((job) => job.phase === 'Running' && !isStalled(job))
   .sort((a, b) => b.startedAt - a.startedAt));
 
+/**
+ * What a row's Status column says, as a sort key.
+ *
+ * The board is sorted by what you can DO with a row before it is sorted by how bad the row is,
+ * because that is the order somebody works in: finish what is started, then start what can be
+ * started, and leave what cannot be acted on here at the bottom. Severity orders within each
+ * group, which is where it belongs - a critical row nobody can fix is still not the next thing
+ * to look at.
+ *
+ *   0  started   a run of ours, or a pull request of ours, already exists
+ *   1  fixable   nothing yet, and a fix here would clear it
+ *   2  elsewhere the library is only in the tree because of the owner package
+ *   3  no fix    no patched version exists at all
+ *
+ * `ownerOnly` is tested before `unfixable` so the row says where the fix belongs rather than
+ * that there isn't one, which is the same order the pills draw them in.
+ */
+function actionRank(row: VulnGroup, job: Job | null): number {
+  if (job || row.pr?.status === 'open') {
+    return 0;
+  }
+
+  if (row.ownerOnly && props.board.ownerPackage) {
+    return 2;
+  }
+
+  if (row.unfixable) {
+    return 3;
+  }
+
+  return 1;
+}
+
 /** The lockfiles one row's alerts are raised against - one entry per distinct file. */
 function manifests(row: VulnGroup): string[] {
   return [...new Set(row.vulns.map((v) => v.manifest).filter(Boolean))].sort();
@@ -75,7 +108,7 @@ const rows = computed(() => {
     job:          jobs.value.find((j) => j.library === row.library) || null,
     stale:        mergedButStillOpen(row),
     severityRank: severityRank(row.severity),
-    flightRank:   row.pr?.status === 'open' ? 0 : 1,
+    actionRank:   actionRank(row, jobs.value.find((j) => j.library === row.library) || null),
     manifests:    manifests(row),
   }));
 });
@@ -83,13 +116,16 @@ const rows = computed(() => {
 const headers = [
   {
     name: 'severity', label: 'Severity', value: 'severity', width: 110,
-    sort: ['flightRank', 'severityRank', 'library'],
+    sort: ['actionRank', 'severityRank', 'library'],
   },
   { name: 'library', label: 'Library', value: 'library', sort: ['library'] },
   { name: 'files', label: 'Files', value: 'manifests' },
   { name: 'vulns', label: 'Vulnerability', value: 'vulns' },
   { name: 'dependabot', label: 'Dependabot', value: 'dependabotPr', width: 120 },
-  { name: 'actions', label: 'Status / actions', value: 'actions' },
+  {
+    name: 'actions', label: 'Status / actions', value: 'actions',
+    sort: ['actionRank', 'severityRank', 'library'],
+  },
 ];
 
 /** Dependabot's own open pull request for this library, if it has one. */
@@ -227,7 +263,7 @@ onUnmounted(() => {
         :table-actions="false"
         :row-actions="false"
         :search="true"
-        default-sort-by="severity"
+        default-sort-by="actions"
         no-rows-key="No open vulnerabilities."
       >
         <template #col:severity="{ row }">

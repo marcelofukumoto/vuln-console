@@ -1,8 +1,17 @@
-// The one credential this extension needs, stored the way Extension Studio stores its GitHub token.
+// The GitHub token, stored per Rancher user.
 //
-// Copied from that extension deliberately, down to the key name, because the interesting part is
-// not where the Secret is but how it is handled - and getting that right from first principles is
-// how a credential ends up in a page.
+// Per user, not per installation, and that is the whole point of this file. A fix pushes a
+// branch and opens a pull request, and both of those are done BY somebody: with one shared token
+// every fix in the cluster is attributed to whoever pasted it, pushes to that person's fork, and
+// asks for review as them. Each person brings their own, and their own fork and authorship
+// follow from it.
+//
+// It is NOT shared with Extension Studio, which was the first design here. That extension keeps
+// one `gh_token` for the whole installation - its own code calls it "a token written by
+// anybody" - so borrowing it would mean everybody acting as one anonymous account, which is the
+// thing this is avoiding. The two are different credentials with the same name.
+//
+// The handling is still Extension Studio's, because that part was right:
 //
 //   - **Write-only from the browser.** A credential goes in and never comes back out. Nothing
 //     here ever fetches a Secret's `data`.
@@ -13,23 +22,43 @@
 //     It has to be the raw apiserver path, because Steve answers in its own shape and ignores
 //     the header.
 //   - **Merge patches.** A read-modify-PUT would have to fetch the object to preserve the keys
-//     it is not touching, which pulls the credential into the page on every save. A patch says
-//     what changed; `null` deletes a key.
-//   - **An annotation says whether one is stored**, so a form can choose between "Set" and
+//     it is not touching - which with one key per user means pulling everybody's token into one
+//     person's browser. A patch says what changed; `null` deletes a key.
+//   - **An annotation says whether one is stored**, so the form can choose between "Set" and
 //     "Replace" without going near `data`.
 //
-// The token itself is read by the agent pod, with its own ServiceAccount, at the moment a gather
-// or a fix runs. It is never sent from here into the pod.
+// The token is read by the pod that needs it, with its own ServiceAccount, at the moment it is
+// needed. It is never sent from here into a pod.
 import { K8S_BASE, rancherFetch } from './rancher';
-import {
-  GH_TOKEN_KEY, NAMESPACE, SECRET_NAME, STUDIO_NAMESPACE, STUDIO_SECRET,
-} from '../config/constants';
+import { GH_TOKEN_KEY, NAMESPACE, SECRET_NAME } from '../config/constants';
 
-export { GH_TOKEN_KEY, NAMESPACE, SECRET_NAME, STUDIO_NAMESPACE, STUDIO_SECRET };
+export { GH_TOKEN_KEY, NAMESPACE, SECRET_NAME };
 
-const GH_ANNOTATION = 'vuln-console.rancher.io/gh-token';
-/** Studio's own marker, read so a token it stored is recognised without touching `data`. */
-const STUDIO_GH_ANNOTATION = 'barn.rancher.io/gh-token';
+/**
+ * A Rancher principal as a Secret key.
+ *
+ * `local://user-qncms` becomes `local-user-qncms`. The principal id is what the dashboard
+ * actually has - it is on every page, it is stable, and it distinguishes a local user from the
+ * same login arriving through GitHub, which two people sharing a name would not.
+ *
+ * Secret data keys allow only `[-._a-zA-Z0-9]`, so everything else collapses to a hyphen.
+ */
+export function userSlug(principalId: string): string {
+  return String(principalId || '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 200) || 'unknown';
+}
+
+/** The Secret key holding one user's token. */
+export function tokenKey(principalId: string): string {
+  return `${ GH_TOKEN_KEY }-${ userSlug(principalId) }`;
+}
+
+function annotationKey(principalId: string): string {
+  // Kubernetes allows 63 characters after the slash; a principal slug is well inside it.
+  return `vuln-console.rancher.io/gh-${ userSlug(principalId) }`.slice(0, 253);
+}
 
 /**
  * Ask for metadata and nothing else.
@@ -39,22 +68,22 @@ const STUDIO_GH_ANNOTATION = 'barn.rancher.io/gh-token';
  */
 const METADATA_ONLY = { Accept: 'application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1' };
 
-function secretPath(namespace: string, name: string): string {
-  return `${ K8S_BASE }/namespaces/${ namespace }/secrets/${ name }`;
+function secretPath(): string {
+  return `${ K8S_BASE }/namespaces/${ NAMESPACE }/secrets/${ SECRET_NAME }`;
 }
 
-async function secretMetadata(namespace: string, name: string): Promise<any | null> {
-  const object = await rancherFetch(secretPath(namespace, name), { headers: METADATA_ONLY }).catch(() => null);
+async function secretMetadata(): Promise<any | null> {
+  const object = await rancherFetch(secretPath(), { headers: METADATA_ONLY }).catch(() => null);
 
   return object?.metadata || null;
 }
 
 /**
- * Which keys a Secret holds, without reading any of them.
+ * Which keys the Secret holds, without reading any of them.
  *
  * From `managedFields`, which records the field paths each writer owns - so `f:data` lists the
- * key names and none of the values. It is the fallback for a Secret written before the
- * annotation existed, which is every Extension Studio older than the change that added it.
+ * key names and none of the values. The fallback for a token stored before the annotation
+ * existed.
  */
 function managedDataKeys(metadata: any): string[] {
   const keys = new Set<string>();
@@ -70,44 +99,42 @@ function managedDataKeys(metadata: any): string[] {
   return [...keys];
 }
 
-/** Where a stored GitHub token came from, which is worth saying on the screen. */
-export type GhSource = 'none' | 'ours' | 'studio';
-
 export interface CredentialStatus {
-  gh: GhSource;
-  /** True when the namespace or Secret could not be read at all - a permissions problem, not an absence. */
+  /** Whether THIS user has stored a token. Nobody else's presence helps them. */
+  stored: boolean;
+  /** How many people have stored one, which is worth saying on a shared board. */
+  others: number;
+  /** True when the namespace or Secret could not be read at all - permissions, not absence. */
   unreadable: boolean;
 }
 
-/**
- * What is stored, and nothing about what it is.
- *
- * Ours is preferred over Studio's: setting one here is somebody saying this extension should use
- * that one, and a borrowed credential should never quietly override a chosen one.
- */
-export async function readCredentialStatus(): Promise<CredentialStatus> {
-  const [ours, studio] = await Promise.all([
-    secretMetadata(NAMESPACE, SECRET_NAME),
-    secretMetadata(STUDIO_NAMESPACE, STUDIO_SECRET),
+export async function readCredentialStatus(principalId: string): Promise<CredentialStatus> {
+  const metadata = await secretMetadata();
+
+  if (!metadata) {
+    return { stored: false, others: 0, unreadable: false };
+  }
+
+  const keys = managedDataKeys(metadata);
+  const annotations = metadata.annotations || {};
+  const mine = annotations[annotationKey(principalId)] === 'set' || keys.includes(tokenKey(principalId));
+  const everyone = new Set([
+    ...keys.filter((key) => key.startsWith(`${ GH_TOKEN_KEY }-`)),
+    ...Object.keys(annotations)
+      .filter((key) => key.startsWith('vuln-console.rancher.io/gh-'))
+      .map((key) => `${ GH_TOKEN_KEY }-${ key.split('/')[1].replace(/^gh-/, '') }`),
   ]);
 
-  const ourKeys = managedDataKeys(ours);
-  const studioKeys = managedDataKeys(studio);
-  const ourAnnotations = ours?.annotations || {};
-  const studioAnnotations = studio?.annotations || {};
-
-  const ourGh = ourAnnotations[GH_ANNOTATION] === 'set' || ourKeys.includes(GH_TOKEN_KEY);
-  const studioGh = studioAnnotations[STUDIO_GH_ANNOTATION] === 'set' || studioKeys.includes(GH_TOKEN_KEY);
-
   return {
-    gh:         ourGh ? 'ours' : studioGh ? 'studio' : 'none',
+    stored:     mine,
+    others:     Math.max(0, everyone.size - (mine ? 1 : 0)),
     unreadable: false,
   };
 }
 
-/** The namespace and an empty Secret, made on the way past so the patch below has something to patch. */
+/** The namespace and an empty Secret, made on the way past so the patch below has a target. */
 async function ensureSecret(): Promise<void> {
-  const existing = await secretMetadata(NAMESPACE, SECRET_NAME);
+  const existing = await secretMetadata();
 
   if (existing) {
     return;
@@ -143,40 +170,28 @@ function encodeSecret(value: string): string {
   return btoa(String.fromCharCode(...new TextEncoder().encode(value)));
 }
 
-export interface CredentialChanges {
-  /** Absent leaves it alone; `''` clears it, which is the only way to remove one. */
-  ghToken?: string;
-}
-
 /**
- * Write only what was touched.
+ * Write this user's token, and only this user's.
  *
- * A field the form left `undefined` is not in `changes` and is not written, which is what stops
- * opening the dialog and saving from blanking a credential nobody could see.
+ * A merge patch naming one key, so nobody else's is read, rewritten or lost. `''` clears it,
+ * which is the only way to remove one.
  */
-export async function saveCredentials(changes: CredentialChanges): Promise<void> {
-  const data: Record<string, string | null> = {};
-  const annotations: Record<string, string | null> = {};
-
-  if (changes.ghToken !== undefined) {
-    data[GH_TOKEN_KEY] = changes.ghToken === '' ? null : encodeSecret(changes.ghToken);
-    annotations[GH_ANNOTATION] = changes.ghToken === '' ? null : 'set';
-  }
-
-  if (!Object.keys(data).length) {
-    return;
-  }
-
+export async function saveCredentials(principalId: string, ghToken: string): Promise<void> {
   await ensureSecret();
 
-  await rancherFetch(secretPath(NAMESPACE, SECRET_NAME), {
+  const clearing = ghToken === '';
+
+  await rancherFetch(secretPath(), {
     method:  'PATCH',
     headers: { 'Content-Type': 'application/merge-patch+json', ...METADATA_ONLY },
-    body:    JSON.stringify({ metadata: { annotations }, data }),
+    body:    JSON.stringify({
+      metadata: { annotations: { [annotationKey(principalId)]: clearing ? null : 'set' } },
+      data:     { [tokenKey(principalId)]: clearing ? null : encodeSecret(ghToken) },
+    }),
   });
 }
 
-/** Whether anything can run: a GitHub token resolvable from somewhere. */
+/** Whether this user can run anything. */
 export function credentialsReady(status: CredentialStatus): boolean {
-  return status.gh !== 'none';
+  return status.stored;
 }

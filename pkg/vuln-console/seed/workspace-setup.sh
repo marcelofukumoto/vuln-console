@@ -10,17 +10,18 @@
 # The token is never on a command line. `kubectl exec` argv travels through the apiserver as URL
 # query parameters, which are logged; it goes over STDIN instead.
 #
-# usage: workspace-setup.sh <workspace-namespace> <repo> <fork>
+# usage: workspace-setup.sh <workspace-namespace> <repo> <fork> <token-key>
 set -e
 
 NS=${1:?workspace-setup.sh needs the workspace namespace}
 REPO=${2:?workspace-setup.sh needs the upstream repository}
 FORK=${3:?workspace-setup.sh needs the fork}
+# The Secret key holding the token of the person who pressed the button. The branch is pushed
+# with THEIR credential, to THEIR fork, so the work is attributable to them.
+TOKEN_KEY=${4:?workspace-setup.sh needs the token key}
 
 SECRET_NS=vuln-console
 SECRET=settings
-STUDIO_NS=extension-studio
-STUDIO_SECRET=settings
 WS=/workspaces/$NS
 
 kube() { KUBECONFIG=/dev/null kubectl "$@"; }
@@ -29,11 +30,10 @@ secret_key() {
   kube get secret "$2" -n "$1" -o "jsonpath={.data.$3}" 2>/dev/null | base64 -d 2>/dev/null | tr -d '\r\n'
 }
 
-GH_TOKEN=$(secret_key "$SECRET_NS" "$SECRET" gh_token)
-[ -n "$GH_TOKEN" ] || GH_TOKEN=$(secret_key "$STUDIO_NS" "$STUDIO_SECRET" gh_token)
+GH_TOKEN=$(secret_key "$SECRET_NS" "$SECRET" "$TOKEN_KEY")
 
 if [ -z "$GH_TOKEN" ]; then
-  echo "workspace-setup.sh: no GitHub token is stored, so the workspace could not push anything" >&2
+  echo "workspace-setup.sh: no GitHub token is stored for this user, so nothing could be pushed" >&2
   exit 2
 fi
 

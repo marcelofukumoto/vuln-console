@@ -38,7 +38,15 @@ const store = useStore();
 const agents = ref<AgentsStatus>({
   state: 'checking', version: null, pod: null, detail: '',
 });
-const credentials = ref<CredentialStatus>({ gh: 'none', unreadable: false });
+const credentials = ref<CredentialStatus>({ stored: false, others: 0, unreadable: false });
+
+/**
+ * Who is looking at this, as Rancher knows them.
+ *
+ * The token is stored per user, so this decides whose is read - and therefore whose fork a fix
+ * pushes to and who its pull request is authored by.
+ */
+const principalId = computed<string>(() => store.getters['auth/principalId'] || '');
 const error = ref('');
 const refreshing = ref(false);
 const askingForToken = ref(false);
@@ -110,14 +118,14 @@ function openShipped(rows: VulnGroup[]): void {
 function manageCredentials(): void {
   blockingCredentials.value = false;
   askingForToken.value = true;
-  readCredentialStatus().then((status) => {
+  readCredentialStatus(principalId.value).then((status) => {
     credentials.value = status;
   }).catch(() => undefined);
 }
 
 /** After the dialog saved: pick up the new state, and carry on if it was in the way of a run. */
 async function credentialsSaved(): Promise<void> {
-  credentials.value = await readCredentialStatus().catch(() => credentials.value);
+  credentials.value = await readCredentialStatus(principalId.value).catch(() => credentials.value);
 
   if (!blockingCredentials.value) {
     askingForToken.value = false;
@@ -140,7 +148,7 @@ async function refresh(): Promise<void> {
   error.value = '';
 
   try {
-    await refreshSnapshot(board.value);
+    await refreshSnapshot(board.value, principalId.value);
     await reload();
   } catch (e: any) {
     error.value = e?.message || String(e);
@@ -162,9 +170,10 @@ async function act(row: VulnGroup, action: JobAction): Promise<void> {
   try {
     const job = await startAction({
       store,
-      board:      board.value,
-      tokenLogin: boardTokenLogin.value[activeBoard.value] || '',
-      library:    row.library,
+      board:       board.value,
+      tokenLogin:  boardTokenLogin.value[activeBoard.value] || '',
+      principalId: principalId.value,
+      library:     row.library,
       action,
       group:   row,
       by:      store.getters['auth/principal']?.loginName,
@@ -221,7 +230,7 @@ async function stop(job: Job | null): Promise<void> {
 whenAgentsReady().then(async() => {
   const [status, creds] = await Promise.all([
     agentsStatus(),
-    readCredentialStatus().catch(() => ({ gh: 'none' as const, unreadable: true })),
+    readCredentialStatus(principalId.value).catch(() => ({ stored: false, others: 0, unreadable: true })),
   ]);
 
   agents.value = status;
@@ -298,8 +307,13 @@ whenAgentsReady().then(async() => {
     </Banner>
 
     <Banner v-else-if="!credentialsReady(credentials)" color="warning">
-      <strong>No GitHub token is stored.</strong> The boards cannot be refreshed and nothing can
-      be fixed until there is one.
+      <strong>You have not stored a GitHub token.</strong> Tokens are per person — a fix pushes
+      to your fork and opens the pull request as you — so yours is needed before you can refresh
+      a board or fix anything.
+      <template v-if="credentials.others">
+        {{ credentials.others }} other {{ credentials.others === 1 ? 'person has' : 'people have' }}
+        stored one.
+      </template>
     </Banner>
 
     <Banner v-if="error" color="error">
@@ -333,6 +347,7 @@ whenAgentsReady().then(async() => {
     <CredentialsDialog
       v-if="askingForToken"
       :status="credentials"
+      :principal-id="principalId"
       :blocking="blockingCredentials"
       @cancel="askingForToken = false"
       @saved="credentialsSaved"

@@ -10,25 +10,23 @@
 # written through the exec socket is a token the browser held; read here, with the pod's own
 # ServiceAccount, at the moment it is needed, the browser never has it at all.
 #
-# usage: gather.sh <work-dir> <board-id> <repo> [owner-package]
+# usage: gather.sh <work-dir> <board-id> <repo> <token-key> [owner-package]
 set -e
 
 DIR=${1:?gather.sh needs a working directory}
 BOARD=${2:?gather.sh needs a board id}
 REPO=${3:?gather.sh needs a repository}
+# The Secret key holding the token of the person who asked for this. Per user, so a gather is
+# done as them and "our pull requests" means theirs.
+TOKEN_KEY=${4:?gather.sh needs the token key}
 # Optional: the package this repository gets most of its tree from. Empty for one that is its own.
-OWNER_PACKAGE=${4:-}
+OWNER_PACKAGE=${5:-}
 SEED=$(dirname "$0")
 
 [ -d "$DIR" ] || { echo "gather.sh: no such directory: $DIR" >&2; exit 2; }
 
 NS=vuln-console
 SECRET=settings
-# Extension Studio keeps an account's GitHub token under this exact name. Ours is preferred -
-# setting one here is somebody choosing it for this extension - and theirs is the fallback, so
-# nobody has to keep two copies of one token in step.
-STUDIO_NS=extension-studio
-STUDIO_SECRET=settings
 
 # kubectl as the pod rather than as whoever opened a terminal in it. shell.sh writes a kubeconfig
 # carrying the Rancher identity of the person who opened the pane, and that identity may not be
@@ -42,11 +40,10 @@ secret_key() {
   kube get secret "$2" -n "$1" -o "jsonpath={.data.$3}" 2>/dev/null | base64 -d 2>/dev/null | tr -d '\r\n'
 }
 
-GH_TOKEN=$(secret_key "$NS" "$SECRET" gh_token)
-[ -n "$GH_TOKEN" ] || GH_TOKEN=$(secret_key "$STUDIO_NS" "$STUDIO_SECRET" gh_token)
+GH_TOKEN=$(secret_key "$NS" "$SECRET" "$TOKEN_KEY")
 
 if [ -z "$GH_TOKEN" ]; then
-  echo "gather.sh: no GitHub token is stored. Set one from the extension's Credentials dialog." >&2
+  echo "gather.sh: no GitHub token is stored for this user. Set one from the Credentials dialog." >&2
   exit 2
 fi
 

@@ -95,17 +95,16 @@ export function prTargetFor(board: Board, tokenLogin: string): string {
   return board.prTarget || forkFor(board, tokenLogin);
 }
 
-/** The Secret holding the GitHub token, and the key inside it. */
+/**
+ * The Secret holding the GitHub tokens, and the prefix of the per-user keys inside it.
+ *
+ * One Secret, one key per Rancher user (`gh_token-<principal>`), because a fix is done BY
+ * somebody: it pushes to their fork and opens the pull request as them. Extension Studio's
+ * single shared `gh_token` is deliberately NOT used — its own code calls it "a token written by
+ * anybody", which would make every fix in the cluster the work of one anonymous account.
+ */
 export const SECRET_NAME = 'settings';
 export const GH_TOKEN_KEY = 'gh_token';
-
-/**
- * Extension Studio keeps an account's GitHub token under this exact name. Ours is preferred -
- * setting one here is somebody choosing it for this extension - and theirs is the fallback, so
- * nobody has to keep two copies of one token in step.
- */
-export const STUDIO_NAMESPACE = 'extension-studio';
-export const STUDIO_SECRET = 'settings';
 
 /** ConfigMap names and the labels that mark what this extension owns, and for which board. */
 export const OWNER_LABEL = 'vuln-console.rancher.io/owns';
