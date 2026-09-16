@@ -101,6 +101,17 @@ function shellWrapper(workspace: string): string {
     `NS=${ shellQuote(workspace) }`,
     `WS=${ shellQuote(`${ WORKSPACES_ROOT }/${ workspace }`) }`,
     'DIR=${PWD}',
+    '',
+    "# The pane's own hooks stay in THIS pod. claude runs its hooks through this wrapper too -",
+    '# they are shell commands and CLAUDE_CODE_SHELL_PREFIX applies to every one - but a hook is',
+    '# about the pane, not about the work: what claude is doing, and the login it refreshed. Sent',
+    '# down the tunnel they look for files that exist here and not in the workspace, and the run',
+    '# reports "UserPromptSubmit hook error" on every turn while the drawer learns nothing.',
+    'case "$1" in',
+    '  *"/seed/chat-hook.mjs"*|*"/seed/claude-credentials.mjs"*) exec /bin/sh -c "$1" ;;',
+    'esac',
+    '',
+
     // `$WS/bin` first so the gh installed by workspace-setup.sh wins, and `.env` sourced so
     // every command the agent runs has GH_TOKEN - which is what makes `gh` and `git push` work
     // at all. `set -a` exports what the file sets; the file is 0600 and holds the token.
@@ -158,7 +169,7 @@ function openingPrompt(
     `Record what you did by writing the job: ${ ROOT }/job.sh ${ board.id } ${ shellQuote(library) } <field>=<value> ...`,
     'Call it when you finish and whenever something durable happens (a branch, a preview, a pull',
     'request). If you cannot finish, record why:',
-    `  ${ ROOT }/job.sh ${ shellQuote(library) } phase=Failed message="one line saying what went wrong"`,
+    `  ${ ROOT }/job.sh ${ board.id } ${ shellQuote(library) } phase=Failed message="one line saying what went wrong"`,
     '',
     'Then stop.',
   ].filter((line) => line !== '').join('\n');
