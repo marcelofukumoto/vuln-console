@@ -250,6 +250,7 @@ export async function startAction(options: StartOptions): Promise<Job> {
     by:         by || 'unknown',
     startedAt:  now,
     updatedAt:  now,
+    stage:      'workspace',
     sessionId:  null,
     workspace:  workspaceName(board.id, library),
     // What an earlier run already achieved is carried forward: Create PR needs the branch the
@@ -285,7 +286,9 @@ export async function startAction(options: StartOptions): Promise<Job> {
       openingPrompt(action, board, fork, prTarget, library, group, { ...job, workspace }),
     );
 
-    const started: Job = { ...job, workspace, sessionId: session, updatedAt: Date.now() };
+    const started: Job = {
+      ...job, workspace, sessionId: session, stage: 'waiting', updatedAt: Date.now(),
+    };
 
     await writeJob(started);
 
@@ -302,6 +305,8 @@ export async function startAction(options: StartOptions): Promise<Job> {
             shellQuote(board.repo),
             shellQuote(fork),
             shellQuote(tokenKey(principalId)),
+            shellQuote(board.id),
+            shellQuote(library),
           ].join(' '),
           `prepare the workspace for ${ board.repo }`,
           WORKSPACE_READY_MS,
@@ -310,6 +315,8 @@ export async function startAction(options: StartOptions): Promise<Job> {
         // Start the pane detached, with the shell prefix pointing into the workspace. Without
         // this nothing attaches until somebody opens the terminal by hand, and the queued prompt
         // is never read - which is not what pressing a button means.
+        await writeJob({ ...started, stage: 'starting', updatedAt: Date.now() }).catch(() => undefined);
+
         await podRunScript(
           target,
           [

@@ -34,20 +34,58 @@ export function elapsedLabel(job: Job, now = Date.now()): string {
  * out of prose is guessing. What the run has written down says it exactly: a branch exists or it
  * does not, a recording exists or it does not.
  */
-export type RunPhase = 'starting' | 'fixing' | 'verifying' | 'recording';
+export type RunPhase =
+  | 'workspace'
+  | 'waiting'
+  | 'preparing'
+  | 'starting'
+  | 'fixing'
+  | 'verifying'
+  | 'recording';
 
-export const RUN_PHASES: RunPhase[] = ['starting', 'fixing', 'verifying', 'recording'];
+export const RUN_PHASES: RunPhase[] = [
+  'workspace', 'waiting', 'preparing', 'starting', 'fixing', 'verifying', 'recording',
+];
 
+/**
+ * What each step is actually waiting for, in words.
+ *
+ * The first four are the workspace being built, which on a first fix is most of the run - a
+ * Fleet Bundle, an image pull, a clone and a yarn install, several minutes before the agent has
+ * done anything at all. Saying "Running" through all of that is how a board looks stuck when it
+ * is working perfectly well.
+ */
 export const PHASE_LABEL: Record<string, string> = {
+  workspace: 'Creating the workspace',
+  waiting:   'Waiting for it to start (clone and install)',
+  preparing: 'Preparing the credential and the fork',
   starting:  'Starting the agent',
   fixing:    'Bumping and regenerating the lockfiles',
   verifying: 'Serving the branch and checking it',
   recording: 'Recording the verification',
 };
 
+/**
+ * Where a run has got to.
+ *
+ * The recorded `stage` wins, because it is what the step doing the work said about itself.
+ * Falling back to what the run has produced - a branch exists or it does not, a recording exists
+ * or it does not - covers a job written before stages existed, and a run whose browser tab
+ * closed mid-way.
+ */
 export function runPhase(job: Job): RunPhase {
+  if (job.stage && RUN_PHASES.includes(job.stage as RunPhase)) {
+    const recorded = job.stage as RunPhase;
+
+    // Never go backwards: once there is a branch the workspace is plainly built, whatever the
+    // last stage written was.
+    if (RUN_PHASES.indexOf(recorded) >= RUN_PHASES.indexOf('starting') || !job.branch) {
+      return recorded;
+    }
+  }
+
   if (!job.sessionId) {
-    return 'starting';
+    return 'workspace';
   }
 
   if (!job.branch) {

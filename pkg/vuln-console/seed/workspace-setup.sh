@@ -10,7 +10,7 @@
 # The token is never on a command line. `kubectl exec` argv travels through the apiserver as URL
 # query parameters, which are logged; it goes over STDIN instead.
 #
-# usage: workspace-setup.sh <workspace-namespace> <repo> <fork> <token-key>
+# usage: workspace-setup.sh <workspace-namespace> <repo> <fork> <token-key> <board> <library>
 set -e
 
 NS=${1:?workspace-setup.sh needs the workspace namespace}
@@ -19,6 +19,10 @@ FORK=${3:?workspace-setup.sh needs the fork}
 # The Secret key holding the token of the person who pressed the button. The branch is pushed
 # with THEIR credential, to THEIR fork, so the work is attributable to them.
 TOKEN_KEY=${4:?workspace-setup.sh needs the token key}
+# So each step can name itself on the job, and the board can say what it is waiting for rather
+# than showing "Running" through five minutes of clone and install.
+BOARD=${5:-}
+LIBRARY=${6:-}
 
 SECRET_NS=vuln-console
 SECRET=settings
@@ -26,12 +30,18 @@ WS=/workspaces/$NS
 
 kube() { KUBECONFIG=/dev/null kubectl "$@"; }
 
+stage() {
+  [ -n "$BOARD" ] && [ -n "$LIBRARY" ] || return 0
+  sh "$(dirname "$0")/job.sh" "$BOARD" "$LIBRARY" "stage=$1" >/dev/null 2>&1 || true
+}
+
 # Wait for the workspace to exist before trying to talk to it.
 #
 # A workspace is minutes old before it is usable: Fleet has to render the Bundle, the kubelet has
 # to pull node:24, and boot.sh then clones the repository and runs a yarn install. Exec'ing into
 # it before any of that has happened fails with `container not found ("workspace")`, which is
 # what the first real run did.
+stage waiting
 echo "workspace-setup.sh: waiting for $NS to come up"
 i=0
 while [ "$i" -lt 240 ]; do
@@ -61,6 +71,8 @@ if [ -z "$GH_TOKEN" ]; then
   echo "workspace-setup.sh: no GitHub token is stored for this user, so nothing could be pushed" >&2
   exit 2
 fi
+
+stage preparing
 
 # The fork has to exist before the agent needs it. Creating it is one call and it is idempotent;
 # discovering it is missing happens at `git push`, three minutes into a run, after the work.

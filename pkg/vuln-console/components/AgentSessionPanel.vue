@@ -10,11 +10,13 @@
 // state and a keystroke it never published, and it put this extension's conversations in a tab
 // strip meant for theirs. Borrowing the one component they do publish, and framing it in the
 // same Rancher drawer the report opens in, keeps both sides to what they offer each other.
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Banner } from '@components/Banner';
 import Drawer from '@shell/components/Drawer/Chrome.vue';
 import RcButton from '@components/RcButton/RcButton.vue';
 import AgentTerminal from './AgentTerminal.vue';
+import RunProgress from './RunProgress.vue';
+import { elapsedLabel, runPhase } from '../lib/format';
 import type { Job } from '../types';
 
 const props = defineProps<{
@@ -44,6 +46,19 @@ const emit = defineEmits<{ (e: 'close'): void }>();
  * finished while the drawer was being opened.
  */
 const state = ref('');
+
+/**
+ * Whether the pane is actually attachable yet.
+ *
+ * A session id exists as soon as the conversation is queued, which is immediately - but the pane
+ * is only started once the workspace is ready, and attaching before that shows an empty
+ * terminal. The stages the run records are what say which it is.
+ */
+const paneStarted = computed(() => {
+  const phase = runPhase(props.job);
+
+  return phase !== 'workspace' && phase !== 'waiting' && phase !== 'preparing';
+});
 </script>
 
 <template>
@@ -58,9 +73,25 @@ const state = ref('');
 
     <template #body>
       <div class="session">
-        <Banner v-if="!job.sessionId" color="warning">
-          This run has no conversation yet — it is still being set up.
-        </Banner>
+        <!--
+          Before the pane exists there is nothing to attach to, and a blank terminal reads as a
+          broken one. On a first fix this is most of the run - a Fleet Bundle, an image pull, a
+          clone and a yarn install - so it says which of those it is waiting on rather than
+          leaving somebody to guess.
+        -->
+        <div v-if="!job.sessionId || !paneStarted" class="session__waiting">
+          <Banner color="info">
+            <strong>Setting the workspace up.</strong>
+            The first fix for a repository clones it and installs its dependencies, which takes
+            several minutes. The agent starts as soon as that is done — you can close this and
+            come back.
+          </Banner>
+          <RunProgress
+            :phase="runPhase(job)"
+            :elapsed="elapsedLabel(job)"
+            :can-open-session="false"
+          />
+        </div>
 
         <!--
           Keyed on the session so that opening a different run's conversation builds a new pane
@@ -108,6 +139,12 @@ const state = ref('');
   height: 100%;
   min-height: 0;
   overflow: hidden;
+
+  &__waiting {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
 
   &__id {
     margin-left: 10px;

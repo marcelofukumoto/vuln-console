@@ -134,6 +134,15 @@ export interface Job {
   by: string;
   startedAt: number;
   updatedAt: number;
+  /**
+   * Where the run has got to, written by whatever is doing the work.
+   *
+   * Recorded rather than inferred. A first fix spends most of its life before the agent has done
+   * anything - Fleet rendering a Bundle, an image pull, a clone, a yarn install - and a board
+   * that says "Running" through all of it is a board that looks stuck. Each step names itself as
+   * it starts, so the strip can say what is actually being waited for.
+   */
+  stage?: string;
   /** The agents conversation, so the session can be watched and stopped. */
   sessionId: string | null;
   /** The apps-plus installation the work happens in. */
