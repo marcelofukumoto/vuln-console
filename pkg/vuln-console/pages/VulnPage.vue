@@ -14,15 +14,15 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useStore } from 'vuex';
 import { Banner } from '@components/Banner';
 import RcButton from '@components/RcButton/RcButton.vue';
+import { RcStatusBadge } from '@components/Pill';
 import CountBox from '@shell/components/CountBox.vue';
 import SortableTable from '@shell/components/SortableTable/index.vue';
-import SeverityBadge from '../components/SeverityBadge.vue';
 import StepPills from '../components/StepPills.vue';
 import VulnIds from '../components/VulnIds.vue';
 import AgentSessionPanel from '../components/AgentSessionPanel.vue';
 import CredentialsDialog from '../components/CredentialsDialog.vue';
 import ShippedDrawer from '../components/ShippedDrawer.vue';
-import { buildLedger, mergedButStillOpen, severityRank } from '../lib/ledger';
+import { buildLedger, mergedButStillOpen, severityRank, severityStatus } from '../lib/ledger';
 import { readCredentialStatus, credentialsReady } from '../lib/credentials';
 import type { CredentialStatus } from '../lib/credentials';
 import { readJobs, readSnapshot } from '../lib/store';
@@ -264,7 +264,11 @@ onUnmounted(() => {
       class="vuln__table"
     >
       <template #col:severity="{ row }">
-        <td><SeverityBadge :severity="row.severity" /></td>
+        <td>
+          <RcStatusBadge :status="severityStatus(row.severity)">
+            {{ row.severity }}
+          </RcStatusBadge>
+        </td>
       </template>
 
       <template #col:library="{ row }">
@@ -277,7 +281,9 @@ onUnmounted(() => {
             target="_blank"
             rel="noopener"
             title="That pull request merged but this alert is still open — the merge did not resolve it. It needs a fresh fix."
-          >merged, alert still open</a>
+          >
+            <RcStatusBadge status="warning">merged, alert still open</RcStatusBadge>
+          </a>
         </td>
       </template>
 
@@ -383,10 +389,9 @@ onUnmounted(() => {
   }
 
   &__stale {
-    display: block;
-    margin-top: 2px;
-    font-size: 11px;
-    color: var(--warning);
+    display: inline-block;
+    margin-top: 4px;
+    text-decoration: none;
   }
 
   // A plain span, not a <code>: the dashboard gives <code> a border and a filled background,

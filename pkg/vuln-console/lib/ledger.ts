@@ -30,6 +30,28 @@ const FIXED_AFTER_MERGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** How long after a merge an open alert is still allowed to read as "awaiting re-scan". */
 const RESCAN_LAG_MS = 12 * 60 * 60 * 1000;
 
+/**
+ * A severity as one of Rancher's statuses.
+ *
+ * So a severity here is drawn by the same component, in the same colours, as every other state
+ * the dashboard shows - rather than by a palette this extension chose for itself. Critical and
+ * high are both `error` because they are both "this is bad"; the table's ordering is what
+ * separates them, and a fifth colour would not.
+ */
+export function severityStatus(severity: string): 'error' | 'warning' | 'info' | 'unknown' {
+  switch (severity) {
+  case 'critical':
+  case 'high':
+    return 'error';
+  case 'medium':
+    return 'warning';
+  case 'low':
+    return 'info';
+  default:
+    return 'unknown';
+  }
+}
+
 export function severityRank(severity: string): number {
   const index = SEVERITY_ORDER.indexOf(severity as Severity);
 

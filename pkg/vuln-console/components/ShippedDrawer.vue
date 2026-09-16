@@ -6,8 +6,9 @@
 // arrives here when GitHub actually closed it - a merged pull request of ours is evidence, not
 // proof, and the rule that treated it as proof once hid three of five open alerts.
 import Drawer from '@shell/components/Drawer/Chrome.vue';
+import { RcStatusBadge } from '@components/Pill';
 import VulnIds from './VulnIds.vue';
-import SeverityBadge from './SeverityBadge.vue';
+import { severityStatus } from '../lib/ledger';
 import type { VulnGroup } from '../types';
 
 defineProps<{ rows: VulnGroup[]; repo: string }>();
@@ -32,7 +33,9 @@ const emit = defineEmits<{ (e: 'close'): void }>();
       </p>
 
       <div v-for="row in rows" :key="row.library" class="shipped__row">
-        <SeverityBadge :severity="row.severity" />
+        <RcStatusBadge :status="severityStatus(row.severity)">
+          {{ row.severity }}
+        </RcStatusBadge>
         <div class="shipped__body">
           <div class="shipped__lib">{{ row.library }}</div>
           <VulnIds :vulns="row.vulns" :repo="repo" />

@@ -12,6 +12,7 @@
 // absent rather than by failing when pressed.
 import { computed } from 'vue';
 import RcButton from '@components/RcButton/RcButton.vue';
+import { RcStatusBadge } from '@components/Pill';
 import { FORK_REPO } from '../config/constants';
 import { isStalled } from '../lib/run';
 import type { Job, JobAction, VulnGroup } from '../types';
@@ -80,15 +81,19 @@ const branchUrl = computed(() => (branch.value ? `https://github.com/${ FORK_REP
 
 <template>
   <div class="steps">
-    <span v-if="unfixable" class="steps__nofix" title="No patched version is available — Dependabot has no fix for this advisory, so there is nothing to bump to.">
+    <RcStatusBadge
+      v-if="unfixable"
+      status="unknown"
+      title="No patched version is available — Dependabot has no fix for this advisory, so there is nothing to bump to."
+    >
       No fix published
-    </span>
+    </RcStatusBadge>
 
     <template v-else>
       <!-- A run in flight: what it is doing, and the way out of it. -->
       <template v-if="running">
         <RcButton variant="secondary" size="small" @click="emit('session')">
-          <span class="steps__spin" />
+          <i class="icon icon-spinner icon-spin" />
           <span>{{ job?.action === 'fix' ? 'Fixing' : 'Working' }}…</span>
         </RcButton>
         <RcButton variant="secondary" size="small" data-testid="vc-stop" @click="emit('stop')">
@@ -98,9 +103,12 @@ const branchUrl = computed(() => (branch.value ? `https://github.com/${ FORK_REP
 
       <!-- A run that stopped saying anything. Not spun forever: it can be stopped. -->
       <template v-else-if="stalled">
-        <span class="steps__stalled" title="This run has not reported for a while. The tab that started it may have been closed, or its pod replaced.">
+        <RcStatusBadge
+          status="warning"
+          title="This run has not reported for a while. The tab that started it may have been closed, or its pod replaced."
+        >
           Stalled
-        </span>
+        </RcStatusBadge>
         <RcButton variant="secondary" size="small" @click="emit('session')">
           <span>Session</span>
         </RcButton>
@@ -111,24 +119,24 @@ const branchUrl = computed(() => (branch.value ? `https://github.com/${ FORK_REP
 
       <template v-else>
         <!-- Fix, or the branch it produced. -->
-        <a v-if="branchUrl" class="steps__done" :href="branchUrl" target="_blank" rel="noopener" :title="`fork branch: ${ branch }`">
-          {{ branch }}
+        <a v-if="branchUrl" class="steps__link" :href="branchUrl" target="_blank" rel="noopener" :title="`fork branch: ${ branch }`">
+          <RcStatusBadge status="success">{{ branch }}</RcStatusBadge>
         </a>
         <RcButton v-else variant="primary" size="small" :disabled="busy" data-testid="vc-fix" @click="emit('act', 'fix')">
           <span>Fix</span>
         </RcButton>
 
         <!-- The pull request, once there is something to open one for. -->
-        <a v-if="pr" class="steps__done" :href="pr.url" target="_blank" rel="noopener">
-          Pull request {{ pr.number }}
+        <a v-if="pr" class="steps__link" :href="pr.url" target="_blank" rel="noopener">
+          <RcStatusBadge status="success">Pull request {{ pr.number }}</RcStatusBadge>
         </a>
         <RcButton v-else-if="branch" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'pr')">
           <span>Create pull request</span>
         </RcButton>
 
         <!-- The recording: published, staged, or still to make. -->
-        <a v-if="published" class="steps__done" :href="video || '#'" target="_blank" rel="noopener">
-          Recording
+        <a v-if="published" class="steps__link" :href="video || '#'" target="_blank" rel="noopener">
+          <RcStatusBadge status="success">Recording</RcStatusBadge>
         </a>
         <RcButton v-else-if="video && pr" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'publish')">
           <span>Add recording to pull request</span>
@@ -148,9 +156,14 @@ const branchUrl = computed(() => (branch.value ? `https://github.com/${ FORK_REP
         </template>
 
         <a
-v-if="job?.replyUrl" class="steps__done" :href="job.replyUrl" target="_blank" rel="noopener"
-           title="the per-point reply this run staged — read it here and post it yourself; the console never comments for you">
-          Reply draft
+          v-if="job?.replyUrl"
+          class="steps__link"
+          :href="job.replyUrl"
+          target="_blank"
+          rel="noopener"
+          title="the per-point reply this run staged — read it here and post it yourself; the console never comments for you"
+        >
+          <RcStatusBadge status="info">Reply draft</RcStatusBadge>
         </a>
 
         <RcButton v-if="job?.sessionId" variant="link" size="small" @click="emit('session')">
@@ -168,45 +181,14 @@ v-if="job?.replyUrl" class="steps__done" :href="job.replyUrl" target="_blank" re
   align-items: center;
   gap: 6px;
 
-  &__done {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    border: 1px solid var(--success);
-    border-radius: 12px;
-    font-size: 11px;
-    color: var(--success);
+  // The badge carries the colour and the shape; the anchor only makes it clickable, so it must
+  // not add an underline or a link colour of its own on top.
+  &__link {
     text-decoration: none;
     max-width: 260px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  &__nofix,
-  &__stalled {
-    font-size: 11px;
-    color: var(--muted);
-  }
-
-  &__stalled {
-    color: var(--warning);
-  }
-
-  &__spin {
-    width: 10px;
-    height: 10px;
-    margin-right: 6px;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 50%;
-    animation: steps-spin 0.7s linear infinite;
-  }
-}
-
-// The console this replaces referenced a spinner class in three places and never defined the
-// keyframes, so every "working" pill showed a blank square for months.
-@keyframes steps-spin {
-  to { transform: rotate(360deg); }
 }
 </style>

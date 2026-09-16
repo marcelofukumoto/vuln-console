@@ -11,6 +11,7 @@ import { computed, ref } from 'vue';
 import { Banner } from '@components/Banner';
 import Drawer from '@shell/components/Drawer/Chrome.vue';
 import RcButton from '@components/RcButton/RcButton.vue';
+import { LabeledInput } from '@components/Form/LabeledInput';
 import { readCredentialStatus, saveCredentials } from '../lib/credentials';
 import type { CredentialStatus } from '../lib/credentials';
 
@@ -70,16 +71,14 @@ async function save(): Promise<void> {
         No GitHub token is stored, so the board cannot be refreshed and nothing can be fixed.
       </Banner>
 
-      <label class="creds__label" for="vc-gh-token">GitHub token</label>
-      <input
-        id="vc-gh-token"
-        v-model="token"
+      <LabeledInput
+        v-model:value="token"
         type="password"
+        label="GitHub token"
         class="creds__input"
-        autocomplete="off"
         data-testid="vc-gh-token"
         :placeholder="stored === 'none' ? 'ghp_…' : 'enter a new token to replace the stored one'"
-      >
+      />
 
       <p class="creds__note">
         It needs to read Dependabot alerts and open pull requests on the fork: the
@@ -102,14 +101,8 @@ async function save(): Promise<void> {
 
 <style lang="scss" scoped>
 .creds {
-  &__label {
-    display: block;
-    margin: 16px 0 4px;
-    font-weight: 600;
-  }
-
   &__input {
-    width: 100%;
+    margin-top: 16px;
   }
 
   &__note {
