@@ -1,35 +1,41 @@
 <script setup lang="ts">
 // The board: what is actionable on rancher/dashboard, and what is being done about it.
 //
-// The same information architecture as the console it replaces - three counts, one table sorted
-// by severity with the in-flight rows first, and the shipped work behind a drawer - built out of
-// Rancher's own components so it is the same kind of page as the rest of the dashboard rather
-// than a dark-themed island.
+// Built to match the interrupt-duty reports console, deliberately and in detail: the same header
+// with the title on the left and the actions on the right, the same `btn role-primary` /
+// `role-secondary` buttons carrying an icon and a label, the same running strip with the same
+// RunProgress steps and the same "Watch the agent" link, and the same drawer - opened the same
+// way, through `slideInPanel`, with the same width and height. Two consoles by the same hand
+// should not need to be learned twice.
 //
-// What is deliberately gone: the "one action at a time" lock that disabled every button on the
-// board. It existed because every fix shared one checkout on one laptop. A workspace per library
-// removes the reason, so two libraries can be worked on at once and only a second run on the
-// SAME library is refused.
+// What it keeps from the console it replaces: three counts, one table sorted by severity with
+// the rows that have a pull request in flight above the ones that do not, and the shipped work
+// behind a drawer.
+//
+// What is deliberately gone is the "one action at a time" lock that disabled every button on the
+// board. It existed because every fix shared one checkout on one laptop; a workspace per library
+// removes the reason.
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useStore } from 'vuex';
 import { Banner } from '@components/Banner';
-import RcButton from '@components/RcButton/RcButton.vue';
 import { RcStatusBadge } from '@components/Pill';
 import CountBox from '@shell/components/CountBox.vue';
 import SortableTable from '@shell/components/SortableTable/index.vue';
 import StepPills from '../components/StepPills.vue';
 import VulnIds from '../components/VulnIds.vue';
+import RunProgress from '../components/RunProgress.vue';
 import AgentSessionPanel from '../components/AgentSessionPanel.vue';
 import CredentialsDialog from '../components/CredentialsDialog.vue';
 import ShippedDrawer from '../components/ShippedDrawer.vue';
 import { buildLedger, mergedButStillOpen, severityRank, severityStatus } from '../lib/ledger';
-import { readCredentialStatus, credentialsReady } from '../lib/credentials';
+import { credentialsReady, readCredentialStatus } from '../lib/credentials';
 import type { CredentialStatus } from '../lib/credentials';
 import { readJobs, readSnapshot } from '../lib/store';
 import { isStalled, startAction, stopRun } from '../lib/run';
 import { appsPlusInstalled } from '../lib/workspace';
 import { agentsStatus, whenAgentsReady } from '../lib/agents';
 import type { AgentsStatus } from '../lib/agents';
+import { elapsedLabel, runPhase } from '../lib/format';
 import { refreshSnapshot } from '../lib/gather';
 import { UPSTREAM_REPO } from '../config/constants';
 import type { Job, JobAction, Ledger, Snapshot, VulnGroup } from '../types';
@@ -38,17 +44,27 @@ const store = useStore();
 
 const snapshot = ref<Snapshot | null>(null);
 const jobs = ref<Job[]>([]);
-const agents = ref<AgentsStatus>({ state: 'checking', version: null, pod: null, detail: '' });
+const agents = ref<AgentsStatus>({
+  state: 'checking', version: null, pod: null, detail: '',
+});
 const credentials = ref<CredentialStatus>({ gh: 'none', unreadable: false });
 const error = ref('');
+const loading = ref(true);
 const refreshing = ref(false);
-const showCredentials = ref(false);
-const showShipped = ref(false);
-const openSession = ref<Job | null>(null);
 
 let poll: ReturnType<typeof setInterval> | null = null;
 
 const ledger = computed<Ledger | null>(() => (snapshot.value ? buildLedger({ snapshot: snapshot.value }) : null));
+
+/** Every run still going, newest first — the strip above the board shows one each. */
+const activeRuns = computed(() => jobs.value
+  .filter((job) => job.phase === 'Running' && !isStalled(job))
+  .sort((a, b) => b.startedAt - a.startedAt));
+
+/** The lockfiles one row's alerts are raised against - one entry per distinct file. */
+function manifests(row: VulnGroup): string[] {
+  return [...new Set(row.vulns.map((v) => v.manifest).filter(Boolean))].sort();
+}
 
 /**
  * One table, with the rows that have a pull request in flight above the ones that do not.
@@ -64,17 +80,15 @@ const rows = computed(() => {
     return [];
   }
 
-  // The sortable columns need real fields to sort on, not derived ones: a header that names a
-  // key the row does not have sorts by nothing, which is how the board first rendered with a
-  // HIGH row sitting below two MEDIUM ones.
+  // The sortable columns need real fields to sort on: a header that names a key the row has not
+  // got sorts by nothing, which is how the board first rendered with a HIGH row below two
+  // MEDIUM ones.
   return [...l.lists.openPrOpen, ...l.lists.openNoPr].map((row) => ({
     ...row,
     id:           row.library,
     job:          jobs.value.find((j) => j.library === row.library) || null,
     stale:        mergedButStillOpen(row),
     severityRank: severityRank(row.severity),
-    // Rows with a pull request in flight come first: they are the ones with something to look
-    // at. Sorting a column explicitly overrides this, which is the point of a sortable column.
     flightRank:   row.pr?.status === 'open' ? 0 : 1,
     manifests:    manifests(row),
   }));
@@ -92,19 +106,14 @@ const headers = [
   { name: 'actions', label: 'Status / actions', value: 'actions' },
 ];
 
-/** The lockfiles one row's alerts are raised against - one entry per distinct file. */
-function manifests(row: VulnGroup): string[] {
-  return [...new Set(row.vulns.map((v) => v.manifest).filter(Boolean))].sort();
-}
-
 /** Dependabot's own open pull request for this library, if it has one. */
 function dependabotPr(library: string) {
   return (snapshot.value?.dependabotPrs || []).find((p) => p.title.startsWith(`Bump ${ library } `)) || null;
 }
 
-const anyRunning = computed(() => jobs.value.some((j) => j.phase === 'Running' && !isStalled(j)));
-
-const ready = computed(() => agents.value.state === 'ready' && credentialsReady(credentials.value) && appsPlusInstalled(store));
+const ready = computed(() => agents.value.state === 'ready'
+  && credentialsReady(credentials.value)
+  && appsPlusInstalled(store));
 
 async function load(): Promise<void> {
   const [snap, allJobs] = await Promise.all([
@@ -114,6 +123,64 @@ async function load(): Promise<void> {
 
   snapshot.value = snap;
   jobs.value = allJobs;
+  loading.value = false;
+}
+
+/**
+ * Show a run's conversation, in a drawer of our own.
+ *
+ * Opened exactly as the reports console opens its own, and as `Show Configuration` opens its:
+ * no `title` (the drawer chrome draws its own bar), full height, wide, focus-trapped, and closed
+ * through a listener rather than by the panel reaching for the store.
+ */
+function watchSession(job: Job): void {
+  if (!job.sessionId) {
+    return;
+  }
+
+  store.commit('slideInPanel/open', {
+    component:      AgentSessionPanel,
+    componentProps: {
+      width:              'wide',
+      height:             'full',
+      triggerFocusTrap:   true,
+      closeOnRouteChange: ['name', 'params', 'query'],
+      onClose:            () => store.commit('slideInPanel/close'),
+      job,
+    },
+  });
+}
+
+function openShipped(): void {
+  store.commit('slideInPanel/open', {
+    component:      ShippedDrawer,
+    componentProps: {
+      width:              'wide',
+      height:             'full',
+      triggerFocusTrap:   true,
+      closeOnRouteChange: ['name', 'params', 'query'],
+      onClose:            () => store.commit('slideInPanel/close'),
+      rows:               ledger.value?.lists.prMerged || [],
+      repo:               UPSTREAM_REPO,
+    },
+  });
+}
+
+function manageCredentials(): void {
+  store.commit('slideInPanel/open', {
+    component:      CredentialsDialog,
+    componentProps: {
+      width:              'wide',
+      height:             'full',
+      triggerFocusTrap:   true,
+      closeOnRouteChange: ['name', 'params', 'query'],
+      onClose:            () => store.commit('slideInPanel/close'),
+      status:             credentials.value,
+      onSaved:            (value: CredentialStatus) => {
+        credentials.value = value;
+      },
+    },
+  });
 }
 
 async function refresh(): Promise<void> {
@@ -130,15 +197,27 @@ async function refresh(): Promise<void> {
   }
 }
 
+/**
+ * Start an action, and show the agent doing it.
+ *
+ * The drawer opens on the way out, because "I pressed Fix" and "show me what that started" are
+ * the same intention - the reports console works this way and having to hunt for a second
+ * button to see your own run is a step nobody wants.
+ */
 async function act(row: VulnGroup, action: JobAction): Promise<void> {
   error.value = '';
 
   try {
     const job = await startAction({
-      store, library: row.library, action, group: row, by: store.getters['auth/principal']?.loginName,
+      store,
+      library: row.library,
+      action,
+      group:   row,
+      by:      store.getters['auth/principal']?.loginName,
     });
 
     jobs.value = [...jobs.value.filter((j) => j.library !== row.library), job];
+    watchSession(job);
   } catch (e: any) {
     error.value = e?.message || String(e);
   }
@@ -149,9 +228,9 @@ async function act(row: VulnGroup, action: JobAction): Promise<void> {
  *
  * Picked here rather than by the agent. The old console passed a sentinel meaning "you choose",
  * which put a judgement in the agent's hands that the board has already made: the list is sorted
- * by severity, and the top actionable row IS the highest-severity one.
+ * by severity, so the top actionable row IS the highest-severity one.
  */
-async function fixHighest(): Promise<void> {
+async function fixWorst(): Promise<void> {
   const candidate = rows.value
     .filter((r) => !r.unfixable && !r.job?.branch && r.job?.phase !== 'Running')
     .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))[0];
@@ -165,13 +244,13 @@ async function fixHighest(): Promise<void> {
   await act(candidate, 'fix');
 }
 
-async function stop(row: { job: Job | null }): Promise<void> {
-  if (!row.job) {
+async function stop(job: Job | null): Promise<void> {
+  if (!job) {
     return;
   }
 
   try {
-    await stopRun(row.job);
+    await stopRun(job);
     await load();
   } catch (e: any) {
     error.value = e?.message || String(e);
@@ -207,179 +286,346 @@ onUnmounted(() => {
 <template>
   <div class="vuln">
     <header class="vuln__head">
-      <h1>Vulnerabilities</h1>
-      <p class="vuln__sub">
-        Actionable Dependabot alerts on <code>{{ UPSTREAM_REPO }}</code>.
-        <strong>Fix</strong> bumps the library in a workspace of its own, serves the branch, and
-        verifies it. Opening the pull request is a separate step.
-      </p>
+      <div class="vuln__titles">
+        <h1 class="vuln__title">
+          Vulnerabilities
+        </h1>
+        <p class="vuln__lede">
+          Actionable Dependabot alerts on <code>{{ UPSTREAM_REPO }}</code> — each with the
+          lockfiles it touches, and a fix that runs in a workspace of its own.
+        </p>
+      </div>
+
+      <div class="vuln__actions">
+        <button
+          type="button"
+          class="btn role-primary"
+          :disabled="!ready"
+          data-testid="vc-fix-worst"
+          :title="ready ? 'Fix the highest-severity vulnerability waiting for one' : agents.detail || 'Not ready yet'"
+          @click="fixWorst"
+        >
+          <i class="icon icon-play" />
+          <span>Fix the worst one</span>
+        </button>
+        <button
+          type="button"
+          class="btn role-secondary"
+          :disabled="!ready || refreshing"
+          data-testid="vc-refresh"
+          title="Re-read the Dependabot alerts and our pull requests"
+          @click="refresh"
+        >
+          <i class="icon icon-refresh" />
+          <span>{{ refreshing ? 'Refreshing…' : 'Refresh' }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn role-secondary"
+          data-testid="vc-credentials-open"
+          title="The GitHub token the board is read and fixed with"
+          @click="manageCredentials"
+        >
+          <i class="icon icon-key" />
+          <span>Credentials</span>
+        </button>
+      </div>
     </header>
 
-    <Banner v-if="agents.state !== 'ready' && agents.state !== 'checking'" color="warning">
-      {{ agents.detail }}
+    <!--
+      The agent's state is a banner only when it is not fine. A full-width green bar saying
+      everything works is a bar that is on screen every second of every day to report an absence
+      of news.
+    -->
+    <Banner
+      v-if="agents.state !== 'ready' && agents.state !== 'checking'"
+      :color="agents.state === 'no-pod' ? 'warning' : 'error'"
+      data-testid="vc-agents-banner"
+    >
+      <strong>Agents is not ready.</strong> {{ agents.detail }}
     </Banner>
+
     <Banner v-else-if="!appsPlusInstalled(store)" color="warning">
-      The Apps Plus extension is not installed. A fix runs in a workspace, and a workspace is an
-      Apps Plus installation — without it there is nowhere for the work to happen.
+      <strong>Apps Plus is not installed.</strong> A fix runs in a workspace, and a workspace is
+      an Apps Plus installation — without it there is nowhere for the work to happen.
     </Banner>
+
     <Banner v-else-if="!credentialsReady(credentials)" color="warning">
-      No GitHub token is stored, so the board cannot be refreshed and nothing can be fixed.
-      <a href="#" @click.prevent="showCredentials = true">Set one</a>.
+      <strong>No GitHub token is stored.</strong> The board cannot be refreshed and nothing can be
+      fixed until there is one.
     </Banner>
+
     <Banner v-if="error" color="error">
       {{ error }}
     </Banner>
 
-    <div v-if="ledger" class="vuln__counts">
-      <CountBox name="In flight" :count="ledger.counts.openPrOpen" primary-color-var="--info" />
-      <CountBox name="To fix" :count="ledger.counts.openNoPr" primary-color-var="--error" />
-      <CountBox name="Shipped" :count="ledger.counts.prMerged" primary-color-var="--success" clickable @click="showShipped = true" />
-    </div>
-
-    <div class="vuln__toolbar">
-      <RcButton variant="primary" :disabled="!ready" @click="fixHighest">
-        <span>Fix the worst one</span>
-      </RcButton>
-      <RcButton variant="secondary" :disabled="!ready || refreshing" data-testid="vc-refresh" @click="refresh">
-        <span>{{ refreshing ? 'Refreshing…' : 'Refresh' }}</span>
-      </RcButton>
-      <RcButton variant="secondary" @click="showCredentials = true">
-        <span>Credentials</span>
-      </RcButton>
-      <span class="vuln__stamp">
-        <template v-if="snapshot">gathered {{ new Date(snapshot.gatheredAt).toLocaleString() }}</template>
-        <template v-else>no gather yet — press Refresh</template>
-      </span>
-    </div>
-
-    <SortableTable
-      :rows="rows"
-      :headers="headers"
-      key-field="id"
-      :table-actions="false"
-      :row-actions="false"
-      :search="true"
-      default-sort-by="severity"
-      no-rows-key="No open vulnerabilities."
-      class="vuln__table"
+    <section
+      v-for="run in activeRuns"
+      :key="run.library"
+      class="vuln__running"
+      data-testid="vc-running"
     >
-      <template #col:severity="{ row }">
-        <td>
-          <RcStatusBadge :status="severityStatus(row.severity)">
-            {{ row.severity }}
-          </RcStatusBadge>
-        </td>
-      </template>
+      <div class="vuln__running-head">
+        <i class="icon icon-spinner icon-spin" />
+        <strong>Fixing {{ run.library }}</strong>
+        <button
+          type="button"
+          class="vuln__running-stop"
+          title="Stop this run"
+          @click="stop(run)"
+        >
+          Stop
+        </button>
+        <span>{{ elapsedLabel(run) }}</span>
+      </div>
+      <RunProgress
+        :phase="runPhase(run)"
+        :elapsed="elapsedLabel(run)"
+        :can-open-session="!!run.sessionId"
+        @open-session="watchSession(run)"
+      />
+    </section>
 
-      <template #col:library="{ row }">
-        <td>
-          <div class="vuln__lib">{{ row.library }}</div>
-          <a
-            v-if="row.stale"
-            class="vuln__stale"
-            :href="row.pr?.url"
-            target="_blank"
-            rel="noopener"
-            title="That pull request merged but this alert is still open — the merge did not resolve it. It needs a fresh fix."
-          >
-            <RcStatusBadge status="warning">merged, alert still open</RcStatusBadge>
-          </a>
-        </td>
-      </template>
+    <div v-if="loading" class="vuln__loading">
+      <i class="icon icon-spinner icon-spin" />
+      <span>Loading the board…</span>
+    </div>
 
-      <template #col:files="{ row }">
-        <td>
-          <span v-for="file in row.manifests" :key="file" class="vuln__file">{{ file }}</span>
-          <span v-if="!row.manifests.length" class="vuln__none">—</span>
-        </td>
-      </template>
+    <template v-else-if="!snapshot">
+      <section class="vuln__empty" data-testid="vc-empty">
+        <h2>The board has not been gathered yet</h2>
+        <p>
+          Refreshing reads every Dependabot alert on <code>{{ UPSTREAM_REPO }}</code> and the pull
+          requests that relate to them, and stores the result in the cluster. It takes a few
+          seconds and happens in the agent pod, not in this page.
+        </p>
+      </section>
+    </template>
 
-      <template #col:vulns="{ row }">
-        <td><VulnIds :vulns="row.vulns" :repo="UPSTREAM_REPO" /></td>
-      </template>
-
-      <template #col:dependabot="{ row }">
-        <td>
-          <a v-if="dependabotPr(row.library)" :href="dependabotPr(row.library)?.url" target="_blank" rel="noopener">
-            {{ dependabotPr(row.library)?.number }}
-          </a>
-          <span v-else class="vuln__none">—</span>
-        </td>
-      </template>
-
-      <template #col:actions="{ row }">
-        <td>
-          <StepPills
-            :row="row"
-            :job="row.job"
-            :busy="anyRunning && row.job?.phase === 'Running'"
-            @act="act(row, $event)"
-            @stop="stop(row)"
-            @session="openSession = row.job"
+    <template v-else>
+      <div class="vuln__toolbar">
+        <div class="vuln__counts">
+          <CountBox name="In flight" :count="ledger?.counts.openPrOpen || 0" primary-color-var="--info" />
+          <CountBox name="To fix" :count="ledger?.counts.openNoPr || 0" primary-color-var="--error" />
+          <CountBox
+            name="Shipped"
+            :count="ledger?.counts.prMerged || 0"
+            primary-color-var="--success"
+            clickable
+            @click="openShipped"
           />
-          <div v-if="row.job?.message" class="vuln__message">{{ row.job.message }}</div>
-        </td>
-      </template>
-    </SortableTable>
+        </div>
 
-    <ShippedDrawer
-      v-if="showShipped && ledger"
-      :rows="ledger.lists.prMerged"
-      :repo="UPSTREAM_REPO"
-      @close="showShipped = false"
-    />
+        <span class="vuln__stamp">
+          gathered {{ new Date(snapshot.gatheredAt).toLocaleString() }}
+        </span>
+      </div>
 
-    <AgentSessionPanel
-      v-if="openSession"
-      :job="openSession"
-      :on-back="() => (openSession = null)"
-      @close="openSession = null"
-    />
+      <SortableTable
+        :rows="rows"
+        :headers="headers"
+        key-field="id"
+        :table-actions="false"
+        :row-actions="false"
+        :search="true"
+        default-sort-by="severity"
+        no-rows-key="No open vulnerabilities."
+        class="vuln__table"
+      >
+        <template #col:severity="{ row }">
+          <td>
+            <RcStatusBadge :status="severityStatus(row.severity)">
+              {{ row.severity }}
+            </RcStatusBadge>
+          </td>
+        </template>
 
-    <CredentialsDialog
-      v-if="showCredentials"
-      :status="credentials"
-      @saved="credentials = $event"
-      @close="showCredentials = false"
-    />
+        <template #col:library="{ row }">
+          <td>
+            <div class="vuln__lib">
+              {{ row.library }}
+            </div>
+            <a
+              v-if="row.stale"
+              class="vuln__stale"
+              :href="row.pr?.url"
+              target="_blank"
+              rel="noopener"
+              title="That pull request merged but this alert is still open — the merge did not resolve it. It needs a fresh fix."
+            >
+              <RcStatusBadge status="warning">merged, alert still open</RcStatusBadge>
+            </a>
+          </td>
+        </template>
+
+        <template #col:files="{ row }">
+          <td>
+            <span v-for="file in row.manifests" :key="file" class="vuln__file">{{ file }}</span>
+            <span v-if="!row.manifests.length" class="vuln__none">—</span>
+          </td>
+        </template>
+
+        <template #col:vulns="{ row }">
+          <td>
+            <VulnIds :vulns="row.vulns" :repo="UPSTREAM_REPO" />
+          </td>
+        </template>
+
+        <template #col:dependabot="{ row }">
+          <td>
+            <a
+              v-if="dependabotPr(row.library)"
+              :href="dependabotPr(row.library)?.url"
+              target="_blank"
+              rel="noopener"
+            >{{ dependabotPr(row.library)?.number }}</a>
+            <span v-else class="vuln__none">—</span>
+          </td>
+        </template>
+
+        <template #col:actions="{ row }">
+          <td>
+            <StepPills
+              :row="row"
+              :job="row.job"
+              :busy="false"
+              @act="act(row, $event)"
+              @stop="stop(row.job)"
+              @session="watchSession(row.job)"
+            />
+            <div v-if="row.job?.message" class="vuln__message">
+              {{ row.job.message }}
+            </div>
+          </td>
+        </template>
+      </SortableTable>
+    </template>
   </div>
 </template>
 
 <style lang="scss" scoped>
+// The same measurements as the reports console, on purpose. Two consoles by the same hand
+// should line up when you flip between them.
 .vuln {
-  padding: 0 0 40px;
+  padding: 20px;
 
   &__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
     margin-bottom: 16px;
+  }
 
-    h1 {
-      margin: 0 0 4px;
+  &__titles {
+    min-width: 0;
+  }
+
+  &__title {
+    margin: 0 0 4px;
+    font-size: 22px;
+    font-weight: 600;
+  }
+
+  &__lede {
+    margin: 0;
+    max-width: 66ch;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 19px;
+  }
+
+  &__actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  &__running {
+    margin-bottom: 18px;
+    padding: 12px 16px;
+    border: 1px solid var(--info);
+    border-radius: 8px;
+    background: var(--body-bg);
+  }
+
+  &__running-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+
+    .icon {
+      color: var(--info);
+    }
+
+    span {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
     }
   }
 
-  &__sub {
-    margin: 0;
-    max-width: 780px;
+  &__running-stop {
+    border: none;
+    background: transparent;
+    color: var(--link);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  &__loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 40px 0;
     color: var(--muted);
+  }
+
+  &__empty {
+    margin: 24px auto 0;
+    max-width: 560px;
+    padding: 28px 32px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    text-align: center;
+
+    h2 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 19px;
+    }
+  }
+
+  &__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
   }
 
   &__counts {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
-    margin-bottom: 16px;
-  }
-
-  &__toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
   }
 
   &__stamp {
-    margin-left: auto;
     font-size: 11px;
     color: var(--muted);
   }
@@ -395,8 +641,7 @@ onUnmounted(() => {
   }
 
   // A plain span, not a <code>: the dashboard gives <code> a border and a filled background,
-  // which made a stack of lockfile paths look like a column of disabled text inputs. The
-  // monospace is what carries "this is a path".
+  // which made a stack of lockfile paths look like a column of disabled text inputs.
   &__file {
     display: block;
     font-family: var(--font-family-mono, monospace);

@@ -15,7 +15,20 @@ import { LabeledInput } from '@components/Form/LabeledInput';
 import { readCredentialStatus, saveCredentials } from '../lib/credentials';
 import type { CredentialStatus } from '../lib/credentials';
 
-const props = defineProps<{ status: CredentialStatus }>();
+const props = defineProps<{
+  status: CredentialStatus;
+  /**
+   * The drawer's own configuration, declared so it is consumed rather than set as an attribute.
+   *
+   * SlideInPanelManager passes its config into the component it mounts. Anything not declared as
+   * a prop falls through to the root element and becomes a real DOM attribute - which is how a
+   * `width="wide"` once ended up on a div.
+   */
+  width?: string;
+  height?: string;
+  triggerFocusTrap?: boolean;
+  closeOnRouteChange?: string[];
+}>();
 
 const emit = defineEmits<{
   (e: 'saved', status: CredentialStatus): void;

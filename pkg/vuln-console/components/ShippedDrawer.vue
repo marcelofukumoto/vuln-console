@@ -11,7 +11,21 @@ import VulnIds from './VulnIds.vue';
 import { severityStatus } from '../lib/ledger';
 import type { VulnGroup } from '../types';
 
-defineProps<{ rows: VulnGroup[]; repo: string }>();
+defineProps<{
+  rows: VulnGroup[];
+  repo: string;
+  /**
+   * The drawer's own configuration, declared so it is consumed rather than set as an attribute.
+   *
+   * SlideInPanelManager passes its config into the component it mounts. Anything not declared as
+   * a prop falls through to the root element and becomes a real DOM attribute - which is how a
+   * `width="wide"` once ended up on a div.
+   */
+  width?: string;
+  height?: string;
+  triggerFocusTrap?: boolean;
+  closeOnRouteChange?: string[];
+}>();
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 </script>
