@@ -172,13 +172,29 @@ onUnmounted(() => {
 
     <template v-else>
       <div class="board__toolbar">
+        <!--
+          The colour variables are the `--sizzle-*` ones, NOT `--info` / `--error` / `--success`.
+          CountBox builds its accent with `rgba(var(<name>), <opacity>)`, so the variable has to
+          hold an RGB TRIPLET - `0, 169, 217` - and the semantic colours hold a hex. Passing a
+          hex makes the whole declaration invalid, which is silent: the 9px coloured edge and the
+          tinted border both fall back to plain black, and three stat cards render as three empty
+          boxes. That is exactly how they first shipped.
+        -->
         <div class="board__counts">
-          <CountBox name="In flight" :count="ledger?.counts.openPrOpen || 0" primary-color-var="--info" />
-          <CountBox name="To fix" :count="ledger?.counts.openNoPr || 0" primary-color-var="--error" />
+          <CountBox
+            name="In flight"
+            :count="ledger?.counts.openPrOpen || 0"
+            primary-color-var="--sizzle-info"
+          />
+          <CountBox
+            name="To fix"
+            :count="ledger?.counts.openNoPr || 0"
+            primary-color-var="--sizzle-error"
+          />
           <CountBox
             name="Shipped"
             :count="ledger?.counts.prMerged || 0"
-            primary-color-var="--success"
+            primary-color-var="--sizzle-success"
             clickable
             @click="emit('shipped', ledger?.lists.prMerged || [])"
           />
@@ -355,6 +371,22 @@ onUnmounted(() => {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
+
+    // A shared floor, so three cards holding 4, 6 and 281 are three cards of one size rather
+    // than three boxes sized by how big their number happens to be today.
+    :deep(.count-container) {
+      min-width: 132px;
+    }
+
+    // The clickable one should say so before it is hovered - it is the only way into the
+    // shipped list.
+    :deep(.count-container.clickable .count) {
+      transition: background-color 0.1s ease-in-out;
+
+      &:hover {
+        background: var(--accent-btn);
+      }
+    }
   }
 
   &__stamp {
