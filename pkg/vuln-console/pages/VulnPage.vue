@@ -51,6 +51,8 @@ const credentials = ref<CredentialStatus>({ gh: 'none', unreadable: false });
 const error = ref('');
 const loading = ref(true);
 const refreshing = ref(false);
+const askingForToken = ref(false);
+const blockingCredentials = ref(false);
 
 let poll: ReturnType<typeof setInterval> | null = null;
 
@@ -166,21 +168,33 @@ function openShipped(): void {
   });
 }
 
+/**
+ * The credentials modal, opened the way the reports console opens its own: rendered inline
+ * behind a flag, not pushed into the drawer. A short form asking for one value is a dialog, and
+ * the other console already decided that.
+ */
 function manageCredentials(): void {
-  store.commit('slideInPanel/open', {
-    component:      CredentialsDialog,
-    componentProps: {
-      width:              'wide',
-      height:             'full',
-      triggerFocusTrap:   true,
-      closeOnRouteChange: ['name', 'params', 'query'],
-      onClose:            () => store.commit('slideInPanel/close'),
-      status:             credentials.value,
-      onSaved:            (value: CredentialStatus) => {
-        credentials.value = value;
-      },
-    },
-  });
+  blockingCredentials.value = false;
+  askingForToken.value = true;
+  readCredentialStatus().then((status) => {
+    credentials.value = status;
+  }).catch(() => undefined);
+}
+
+/** After the dialog saved: pick up the new state, and carry on if it was in the way of a run. */
+async function credentialsSaved(): Promise<void> {
+  credentials.value = await readCredentialStatus().catch(() => credentials.value);
+
+  if (!blockingCredentials.value) {
+    askingForToken.value = false;
+
+    return;
+  }
+
+  if (credentialsReady(credentials.value)) {
+    askingForToken.value = false;
+    await fixWorst();
+  }
 }
 
 async function refresh(): Promise<void> {
@@ -231,6 +245,13 @@ async function act(row: VulnGroup, action: JobAction): Promise<void> {
  * by severity, so the top actionable row IS the highest-severity one.
  */
 async function fixWorst(): Promise<void> {
+  if (!credentialsReady(credentials.value)) {
+    blockingCredentials.value = true;
+    askingForToken.value = true;
+
+    return;
+  }
+
   const candidate = rows.value
     .filter((r) => !r.unfixable && !r.job?.branch && r.job?.phase !== 'Running')
     .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))[0];
@@ -300,7 +321,7 @@ onUnmounted(() => {
         <button
           type="button"
           class="btn role-primary"
-          :disabled="!ready"
+          :disabled="agents.state !== 'ready' || !appsPlusInstalled(store)"
           data-testid="vc-fix-worst"
           :title="ready ? 'Fix the highest-severity vulnerability waiting for one' : agents.detail || 'Not ready yet'"
           @click="fixWorst"
@@ -435,7 +456,7 @@ onUnmounted(() => {
         <template #col:severity="{ row }">
           <td>
             <RcStatusBadge :status="severityStatus(row.severity)">
-              {{ row.severity }}
+              {{ row.severity.toUpperCase() }}
             </RcStatusBadge>
           </td>
         </template>
@@ -500,6 +521,14 @@ onUnmounted(() => {
         </template>
       </SortableTable>
     </template>
+
+    <CredentialsDialog
+      v-if="askingForToken"
+      :status="credentials"
+      :blocking="blockingCredentials"
+      @cancel="askingForToken = false"
+      @saved="credentialsSaved"
+    />
   </div>
 </template>
 
@@ -632,6 +661,7 @@ onUnmounted(() => {
 
   &__lib {
     font-weight: 600;
+    white-space: nowrap;
   }
 
   &__stale {

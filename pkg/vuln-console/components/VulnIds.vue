@@ -37,7 +37,7 @@ const chips = computed(() => props.vulns.map((v) => ({
       rel="noopener"
       :title="chip.title"
     >
-      <RcStatusBadge :status="chip.status">{{ chip.id }}</RcStatusBadge>
+      <RcStatusBadge :status="chip.status">#{{ chip.id }}</RcStatusBadge>
     </a>
   </div>
 </template>
