@@ -34,8 +34,16 @@ export interface Store {
   getters: Record<string, any>;
 }
 
+/**
+ * Whether apps-plus is here AND usable.
+ *
+ * Both schemas, not just one: a workspace needs an App to exist and an AppInstance made from it,
+ * and a store that knows one type and not the other fails at `save()` rather than at the check.
+ */
 export function appsPlusInstalled(store: Store): boolean {
-  return !!store.getters['management/schemaFor']?.(APP_INSTANCE_TYPE);
+  const schemaFor = store.getters['management/schemaFor'];
+
+  return !!schemaFor?.(APP_TYPE) && !!schemaFor?.(APP_INSTANCE_TYPE);
 }
 
 /**
@@ -70,6 +78,11 @@ export function workspaceApp(): Record<string, any> {
     .map((name) => ({ name: name.replace('workspace/', ''), content: MANIFESTS[name] }));
 
   return {
+    // `type` is what the dashboard store dispatches on, and without it `save()` cannot find a
+    // schema and throws "insufficient permissions or resource type not found" - with the type it
+    // was looking for printed as `undefined`, which is the tell. apiVersion and kind are for the
+    // apiserver; `type` is for the store, and both are needed.
+    type:       APP_TYPE,
     apiVersion: 'appsplus.io/v1alpha1',
     kind:       'App',
     metadata:   { name: WORKSPACE_APP },
