@@ -32,9 +32,39 @@ const emit = defineEmits<{
 const job = computed(() => props.job);
 const running = computed(() => job.value?.phase === 'Running' && !isStalled(job.value));
 const stalled = computed(() => !!job.value && isStalled(job.value));
-const branch = computed(() => job.value?.branch || null);
-const pr = computed(() => (job.value?.prUrl ? { url: job.value.prUrl, number: job.value.prNumber } : null));
-const video = computed(() => job.value?.videoUrl || null);
+
+/**
+ * What already exists for this row, from EITHER a run we recorded or the pull request the
+ * ledger found.
+ *
+ * Both, deliberately. A job is what this extension remembers; the ledger is what GitHub says.
+ * Reading only the job meant a library with an open pull request of ours - attributed, sitting
+ * in the in-flight list, its number shown two columns to the left - still offered a Fix button,
+ * because no job record happened to exist in this cluster. That is an invitation to open a
+ * second pull request for something already in review, and the old console avoided it by
+ * falling back to the same place.
+ *
+ * The job wins where both have an answer: it is this run's own record and it is newer.
+ */
+const pr = computed(() => {
+  if (job.value?.prUrl) {
+    return { url: job.value.prUrl, number: job.value.prNumber };
+  }
+
+  const found = props.row.pr;
+
+  return found?.status === 'open' ? { url: found.url, number: found.number } : null;
+});
+
+const branch = computed(() => job.value?.branch || (props.row.pr?.status === 'open' ? props.row.pr.headRefName : null) || null);
+
+/**
+ * A recording already attached to the pull request counts as published.
+ *
+ * It survives losing our own record of the run - the pull request is the durable copy - so the
+ * pill is a link to the recording rather than a stale offer to make one.
+ */
+const video = computed(() => job.value?.videoUrl || props.row.pr?.videoUrl || null);
 const published = computed(() => !!video.value && /^https?:\/\//.test(video.value));
 
 /**

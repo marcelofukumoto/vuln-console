@@ -64,16 +64,27 @@ const rows = computed(() => {
     return [];
   }
 
+  // The sortable columns need real fields to sort on, not derived ones: a header that names a
+  // key the row does not have sorts by nothing, which is how the board first rendered with a
+  // HIGH row sitting below two MEDIUM ones.
   return [...l.lists.openPrOpen, ...l.lists.openNoPr].map((row) => ({
     ...row,
-    id:      row.library,
-    job:     jobs.value.find((j) => j.library === row.library) || null,
-    stale:   mergedButStillOpen(row),
+    id:           row.library,
+    job:          jobs.value.find((j) => j.library === row.library) || null,
+    stale:        mergedButStillOpen(row),
+    severityRank: severityRank(row.severity),
+    // Rows with a pull request in flight come first: they are the ones with something to look
+    // at. Sorting a column explicitly overrides this, which is the point of a sortable column.
+    flightRank:   row.pr?.status === 'open' ? 0 : 1,
+    manifests:    manifests(row),
   }));
 });
 
 const headers = [
-  { name: 'severity', labelKey: '', label: 'Severity', value: 'severity', sort: ['severityRank', 'library'], width: 110 },
+  {
+    name: 'severity', label: 'Severity', value: 'severity', width: 110,
+    sort: ['flightRank', 'severityRank', 'library'],
+  },
   { name: 'library', label: 'Library', value: 'library', sort: ['library'] },
   { name: 'files', label: 'Files', value: 'manifests' },
   { name: 'vulns', label: 'Vulnerability', value: 'vulns' },
@@ -272,8 +283,8 @@ onUnmounted(() => {
 
       <template #col:files="{ row }">
         <td>
-          <code v-for="file in manifests(row)" :key="file" class="vuln__file">{{ file }}</code>
-          <span v-if="!manifests(row).length" class="vuln__none">—</span>
+          <span v-for="file in row.manifests" :key="file" class="vuln__file">{{ file }}</span>
+          <span v-if="!row.manifests.length" class="vuln__none">—</span>
         </td>
       </template>
 
@@ -378,11 +389,15 @@ onUnmounted(() => {
     color: var(--warning);
   }
 
+  // A plain span, not a <code>: the dashboard gives <code> a border and a filled background,
+  // which made a stack of lockfile paths look like a column of disabled text inputs. The
+  // monospace is what carries "this is a path".
   &__file {
     display: block;
+    font-family: var(--font-family-mono, monospace);
     font-size: 11px;
-    background: none;
-    padding: 0;
+    color: var(--muted);
+    white-space: nowrap;
   }
 
   &__none {
