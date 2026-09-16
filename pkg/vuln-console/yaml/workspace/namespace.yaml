@@ -1,0 +1,11 @@
+# The workspace's own namespace. One per fix in flight, named for the installation, so a run's
+# pod, service and config are deleted together by deleting the installation.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${namespace}
+  labels:
+    vuln-console.rancher.io/workspace: ${install}
+  annotations:
+    vuln-console.rancher.io/port: "${port}"
+    vuln-console.rancher.io/scheme: ${scheme}

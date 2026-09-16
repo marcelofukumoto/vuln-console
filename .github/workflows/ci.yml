@@ -1,0 +1,29 @@
+# The gates, on every push and pull request: the bundle has to build, and the code has to pass
+# lint and the type checker before it does.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: yarn install --frozen-lockfile
+      - run: yarn lint
+      - run: yarn type-check
+      # The in-pod scripts are written into the agent pod from seed.generated.ts, so an edit
+      # under seed/ that was not regenerated is an edit that never reaches the pod. Regenerating
+      # here and checking for a diff is what catches that.
+      - name: seed.generated.ts is up to date
+        run: |
+          yarn gen-seed
+          git diff --exit-code -- pkg/interrupt-duty-reports/seed.generated.ts \
+            || { echo "::error::seed.generated.ts is stale - run 'yarn gen-seed' and commit it"; exit 1; }
+      - run: yarn build-pkg interrupt-duty-reports

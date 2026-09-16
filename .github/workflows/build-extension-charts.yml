@@ -1,0 +1,87 @@
+# Publish this extension to the repository's gh-pages branch.
+#
+# What Rancher consumes is a Helm repository: an index.yaml at the root of the branch, the
+# chart archives under assets/, and the built extension under extensions/. Somebody installing
+# it adds this repository's Pages URL under Apps -> Repositories.
+#
+# The build itself is rancher/dashboard's own reusable workflow, pinned by SHA rather than
+# tracked at @master: it is a third party's workflow with write access to this repository's
+# branches. The tag beside the SHA is the shell major this extension is built against - bump
+# both together.
+#
+# Two things have to be true before the first run, and neither is something a workflow can
+# arrange: the gh-pages branch has to exist, and the repository has to be public (Rancher
+# fetches the index from Pages and the bundle from raw.githubusercontent.com with no
+# credential).
+name: Build and Release Extension Charts
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+  # Publishing is bumping the number. Pushing every commit is not an option: this publishes a
+  # Helm repository, where a chart version is meant to be immutable.
+  push:
+    branches: [main]
+    paths:
+      - 'pkg/interrupt-duty-reports/package.json'
+
+defaults:
+  run:
+    shell: bash
+    working-directory: ./
+
+jobs:
+  # The path filter fires on any edit to package.json, not only the version - so without this a
+  # change to something else in that file would republish the same number with new contents.
+  version-check:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: decide
+        run: |
+          version=$(node -p "require('./pkg/interrupt-duty-reports/package.json').version")
+          git fetch --depth=1 origin gh-pages 2>/dev/null || true
+          if git show origin/gh-pages:index.yaml > /tmp/index.yaml 2>/dev/null; then
+            if grep -qE "^[[:space:]]+version: ${version}$" /tmp/index.yaml; then
+              echo "interrupt-duty-reports ${version} is already on gh-pages - nothing to publish"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "interrupt-duty-reports ${version} is not published yet"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+  build-extension-charts:
+    needs: version-check
+    if: github.event_name != 'push' || needs.version-check.outputs.publish == 'true'
+    uses: rancher/dashboard/.github/workflows/build-extension-charts.yml@9bf23dff6650116673346447bcf0b088e0edb27f # creators-pkg-v3.0.12
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      target_branch: gh-pages
+      tagged_release: ${{ github.event_name == 'release' && github.ref_name || '' }}
+
+  # Did anything actually get built? The publish script does not fail when the build under it
+  # does - it will happily publish a plugin directory with a package.json and no JavaScript,
+  # which Rancher then installs, caches, marks Ready, and loads nothing from.
+  verify-published:
+    needs: build-extension-charts
+    if: always() && needs.build-extension-charts.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: A bundle exists for this version
+        run: |
+          version=$(node -p "require('./pkg/interrupt-duty-reports/package.json').version")
+          git fetch --depth=1 origin gh-pages
+          files=$(git ls-tree -r --name-only origin/gh-pages "extensions/interrupt-duty-reports/${version}/plugin" || true)
+          echo "$files"
+          if ! echo "$files" | grep -qE '\.js$'; then
+            echo "::error::published ${version} has no JavaScript - the build failed and the publish swallowed it"
+            exit 1
+          fi
+          echo "ok: $(echo "$files" | grep -cE '\.js$') javascript files published"

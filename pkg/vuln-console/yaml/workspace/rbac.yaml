@@ -1,0 +1,24 @@
+# What the workspace pod may do, which is only ever within its own namespace.
+#
+# Deliberately not cluster-admin. The agents pod is cluster-admin because it edits the cluster;
+# a workspace only ever builds a branch and serves it, so a RoleBinding - not a ClusterRoleBinding
+# - is what it gets. A fix that needs more than this is a fix worth looking at.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: ${namespace}
+  name: vuln-workspace
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: ${namespace}
+  name: vuln-workspace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: ServiceAccount
+    name: vuln-workspace
+    namespace: ${namespace}

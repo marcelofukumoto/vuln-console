@@ -1,0 +1,136 @@
+# The workspace: a checkout with a supervised dev server, and a Chromium beside it.
+#
+# Two containers in one pod so they share localhost - the browser drives the dev server at
+# 127.0.0.1 and the agent drives the browser at 127.0.0.1:9222, with nothing to route and no
+# service to resolve between them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: ${namespace}
+  name: ${namespace}
+  labels:
+    vuln-console.rancher.io/workspace: ${install}
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: two of these would both want the hostPath tree and the same
+  # node_modules, and the second would fight the first for the yarn mutex.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      vuln-console.rancher.io/workspace: ${install}
+  template:
+    metadata:
+      labels:
+        vuln-console.rancher.io/workspace: ${install}
+    spec:
+      serviceAccountName: vuln-workspace
+      containers:
+        - name: workspace
+          image: ${image}
+          command: ["/bin/sh", "/workspace-config/boot.sh"]
+          env:
+            # The path this dev server is reached at. The dashboard bakes its router base in at
+            # build time, so it has to know the prefix the proxy strips on the way in.
+            - name: DEV_PROXY_PATH
+              value: /k8s/clusters/${hostCluster}/api/v1/namespaces/${namespace}/services/${scheme}:${namespace}:${port}/proxy
+            - name: API
+              value: ${rancherUrl}
+            - name: RANCHER_URL
+              value: ${rancherUrl}
+            - name: VULN_BROWSER_CDP
+              value: http://localhost:9222
+            # This cluster is k3s inside the Rancher container, so the node's own address is
+            # how the dev server reaches the Rancher it belongs to.
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            # A dashboard build is a large one; the default heap is not enough for it.
+            - name: NODE_OPTIONS
+              value: --max_old_space_size=4096
+          ports:
+            - containerPort: ${port}
+              protocol: TCP
+          # The first start is a clone, a yarn install and a first compile - minutes, not
+          # seconds - so the startup probe is allowed a long time before it gives up, and only
+          # then does the readiness probe take over.
+          startupProbe:
+            httpGet:
+              path: /index.html
+              port: ${port}
+              scheme: HTTPS
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: /index.html
+              port: ${port}
+              scheme: HTTPS
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 5Gi
+          volumeMounts:
+            - name: work
+              mountPath: /workspaces
+            - name: workspace-config
+              mountPath: /workspace-config
+            - name: seed
+              mountPath: /seed
+        - name: browser
+          image: lscr.io/linuxserver/chromium:latest
+          env:
+            - name: CHROME_CLI
+              value: --remote-debugging-port=9222 --remote-allow-origins=* --ignore-certificate-errors ${scheme}://localhost:${port}
+            - name: DOCKER_MODS
+              value: linuxserver/mods:universal-package-install
+            - name: INSTALL_PACKAGES
+              value: ${a11yPackages}
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+            - containerPort: 9222
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 3Gi
+          volumeMounts:
+            # Chromium needs more shared memory than the default 64 MiB or it dies rendering
+            # anything substantial.
+            - name: dshm
+              mountPath: /dev/shm
+            - name: work
+              mountPath: /artifacts
+              subPath: ${install}/artifacts
+      volumes:
+        # The PARENT of the workspaces, deliberately: the checkout's node_modules is hard-linked
+        # from a template shared between workspaces, and a hard link cannot cross mounts.
+        - name: work
+          hostPath:
+            path: /var/lib/rancher/vuln-workspaces
+            type: DirectoryOrCreate
+        - name: workspace-config
+          configMap:
+            name: vuln-workspace-config
+            defaultMode: 365
+        # The agents extension's own seed, for the terminal tools. Optional: a workspace still
+        # builds and serves without it, it just has no tmux.
+        - name: seed
+          configMap:
+            name: agent-seed
+            defaultMode: 365
+            optional: true
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi

@@ -1,0 +1,25 @@
+# Two ports, two ways in.
+#
+# The dev server (${port}) is reached through the Kubernetes apiserver's service proxy, on
+# Rancher's own origin - so there is no Ingress, no hostname to choose and no certificate to
+# wait for, and the browser's existing Rancher session authenticates it. The browser sidecar
+# (3000) is framed the same way.
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: ${namespace}
+  name: ${namespace}
+  labels:
+    vuln-console.rancher.io/workspace: ${install}
+spec:
+  selector:
+    vuln-console.rancher.io/workspace: ${install}
+  ports:
+    - name: http
+      port: ${port}
+      targetPort: ${port}
+      protocol: TCP
+    - name: browser
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
