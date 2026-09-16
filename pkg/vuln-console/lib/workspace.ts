@@ -160,7 +160,21 @@ export async function ensureWorkspaceApp(store: Store): Promise<void> {
  * console this replaces had no such notion and could put two agents on ONE shared checkout,
  * where they clobbered each other's lockfile work.
  */
-export async function ensureWorkspace(store: Store, board: Board, library: string): Promise<string> {
+export async function ensureWorkspace(
+  store: Store,
+  board: Board,
+  /**
+   * The fork, already resolved.
+   *
+   * Passed in rather than read off the board, because the board no longer carries one: it is
+   * derived from whoever's token is stored. Reading `board.fork` here got `undefined`, apps-plus
+   * fell back to the App's DEFAULT value, and a rancher-ai-ui workspace came up with its `fork`
+   * remote pointing at the dashboard fork - which would have pushed a rancher-ai-ui branch into
+   * the wrong repository.
+   */
+  fork: string,
+  library: string,
+): Promise<string> {
   const name = workspaceName(board.id, library);
   const existing = await store.dispatch('management/find', { type: APP_INSTANCE_TYPE, id: name })
     .catch(() => null);
@@ -184,7 +198,7 @@ export async function ensureWorkspace(store: Store, board: Board, library: strin
       app:              WORKSPACE_APP,
       namespace:        name,
       targets:          [{ clusterName: 'local' }],
-      values:           { repo: board.repo, fork: board.fork },
+      values:           { repo: board.repo, fork },
       provisionCluster: { enabled: false },
     },
   });

@@ -269,7 +269,7 @@ export async function startAction(options: StartOptions): Promise<Job> {
   await writeJob(job);
 
   try {
-    const workspace = await ensureWorkspace(store, board, library);
+    const workspace = await ensureWorkspace(store, board, fork, library);
     const target = agentTarget(pod);
 
     await writeSeed(target, workspace);
@@ -333,8 +333,14 @@ export async function startAction(options: StartOptions): Promise<Job> {
           120000,
         );
       } catch (e: any) {
+        // Re-read before recording the failure. `started` is a snapshot from before the work
+        // began, and the steps since have written their own stage onto the job - spreading the
+        // snapshot would put the stage back to where it was and report the failure at the wrong
+        // step.
+        const latest = (await readJobs(board.id).catch(() => [])).find((j) => j.library === library);
+
         await writeJob({
-          ...started,
+          ...(latest || started),
           phase:     'Failed',
           message:   e?.message || String(e),
           updatedAt: Date.now(),
