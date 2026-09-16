@@ -1,0 +1,182 @@
+<script setup lang="ts">
+// What can be done to one row, and what has already been done to it.
+//
+// This is the board's state machine and it is the part worth keeping exactly as it was: colour
+// says state, and a step that has produced something stops being a button and becomes a link to
+// the thing it produced. Blue is available, grey is blocked, green is done, and a run in flight
+// shows what it is doing.
+//
+// The order is the order the work happens in - fix, pull request, recording - followed by what
+// only exists once there is a pull request. A step is not offered before its prerequisite: you
+// cannot open a pull request for a fix that does not exist, and the button says so by being
+// absent rather than by failing when pressed.
+import { computed } from 'vue';
+import RcButton from '@components/RcButton/RcButton.vue';
+import { FORK_REPO } from '../config/constants';
+import { isStalled } from '../lib/run';
+import type { Job, JobAction, VulnGroup } from '../types';
+
+const props = defineProps<{
+  row: VulnGroup;
+  job: Job | null;
+  /** True while this row's own run is going. */
+  busy: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: 'act', action: JobAction): void;
+  (e: 'stop'): void;
+  (e: 'session'): void;
+}>();
+
+const job = computed(() => props.job);
+const running = computed(() => job.value?.phase === 'Running' && !isStalled(job.value));
+const stalled = computed(() => !!job.value && isStalled(job.value));
+const branch = computed(() => job.value?.branch || null);
+const pr = computed(() => (job.value?.prUrl ? { url: job.value.prUrl, number: job.value.prNumber } : null));
+const video = computed(() => job.value?.videoUrl || null);
+const published = computed(() => !!video.value && /^https?:\/\//.test(video.value));
+
+/**
+ * Nothing is offered for a row with no fix available.
+ *
+ * Every alert in it lacks a patched version, so there is no version to bump to - a Fix button
+ * here would start a run that can only fail.
+ */
+const unfixable = computed(() => props.row.unfixable);
+
+const branchUrl = computed(() => (branch.value ? `https://github.com/${ FORK_REPO }/tree/${ branch.value }` : null));
+</script>
+
+<template>
+  <div class="steps">
+    <span v-if="unfixable" class="steps__nofix" title="No patched version is available — Dependabot has no fix for this advisory, so there is nothing to bump to.">
+      No fix published
+    </span>
+
+    <template v-else>
+      <!-- A run in flight: what it is doing, and the way out of it. -->
+      <template v-if="running">
+        <RcButton variant="secondary" size="small" @click="emit('session')">
+          <span class="steps__spin" />
+          <span>{{ job?.action === 'fix' ? 'Fixing' : 'Working' }}…</span>
+        </RcButton>
+        <RcButton variant="secondary" size="small" data-testid="vc-stop" @click="emit('stop')">
+          <span>Stop</span>
+        </RcButton>
+      </template>
+
+      <!-- A run that stopped saying anything. Not spun forever: it can be stopped. -->
+      <template v-else-if="stalled">
+        <span class="steps__stalled" title="This run has not reported for a while. The tab that started it may have been closed, or its pod replaced.">
+          Stalled
+        </span>
+        <RcButton variant="secondary" size="small" @click="emit('session')">
+          <span>Session</span>
+        </RcButton>
+        <RcButton variant="secondary" size="small" @click="emit('stop')">
+          <span>Stop</span>
+        </RcButton>
+      </template>
+
+      <template v-else>
+        <!-- Fix, or the branch it produced. -->
+        <a v-if="branchUrl" class="steps__done" :href="branchUrl" target="_blank" rel="noopener" :title="`fork branch: ${ branch }`">
+          {{ branch }}
+        </a>
+        <RcButton v-else variant="primary" size="small" :disabled="busy" data-testid="vc-fix" @click="emit('act', 'fix')">
+          <span>Fix</span>
+        </RcButton>
+
+        <!-- The pull request, once there is something to open one for. -->
+        <a v-if="pr" class="steps__done" :href="pr.url" target="_blank" rel="noopener">
+          Pull request {{ pr.number }}
+        </a>
+        <RcButton v-else-if="branch" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'pr')">
+          <span>Create pull request</span>
+        </RcButton>
+
+        <!-- The recording: published, staged, or still to make. -->
+        <a v-if="published" class="steps__done" :href="video || '#'" target="_blank" rel="noopener">
+          Recording
+        </a>
+        <RcButton v-else-if="video && pr" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'publish')">
+          <span>Add recording to pull request</span>
+        </RcButton>
+        <RcButton v-else-if="branch || pr" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'record')">
+          <span>Record</span>
+        </RcButton>
+
+        <!-- Only once a pull request exists. -->
+        <template v-if="pr">
+          <RcButton variant="secondary" size="small" :disabled="busy" @click="emit('act', 'addresscomment')">
+            <span>Address comments</span>
+          </RcButton>
+          <RcButton variant="secondary" size="small" :disabled="busy" @click="emit('act', 'resolveconflict')">
+            <span>Rebase</span>
+          </RcButton>
+        </template>
+
+        <a
+v-if="job?.replyUrl" class="steps__done" :href="job.replyUrl" target="_blank" rel="noopener"
+           title="the per-point reply this run staged — read it here and post it yourself; the console never comments for you">
+          Reply draft
+        </a>
+
+        <RcButton v-if="job?.sessionId" variant="link" size="small" @click="emit('session')">
+          <span>Session</span>
+        </RcButton>
+      </template>
+    </template>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+
+  &__done {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border: 1px solid var(--success);
+    border-radius: 12px;
+    font-size: 11px;
+    color: var(--success);
+    text-decoration: none;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__nofix,
+  &__stalled {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  &__stalled {
+    color: var(--warning);
+  }
+
+  &__spin {
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: steps-spin 0.7s linear infinite;
+  }
+}
+
+// The console this replaces referenced a spinner class in three places and never defined the
+// keyframes, so every "working" pill showed a blank square for months.
+@keyframes steps-spin {
+  to { transform: rotate(360deg); }
+}
+</style>
