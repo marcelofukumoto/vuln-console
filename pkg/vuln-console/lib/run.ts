@@ -281,7 +281,9 @@ export async function startAction(options: StartOptions): Promise<Job> {
     // repository and runs a yarn install. Waiting for all that before answering would be a
     // button that appears to hang for five minutes.
     const session = await api.agent.startInProject(
-      agentProject(`${ workspace }-${ action }-${ now }`),
+      // agentProject adds its own timestamp; spending characters on a second one only
+      // eats the room the library name needs.
+      agentProject(`${ workspace }-${ action }`),
       `${ VERBS[action] } ${ library }`,
       openingPrompt(action, board, fork, prTarget, library, group, { ...job, workspace }),
     );

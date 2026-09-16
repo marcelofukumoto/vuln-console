@@ -44,8 +44,19 @@ const AGENTS_READY_EVENT = 'agents:ready';
  * A run id is already unique, already lowercase letters, digits and hyphens, and at 23
  * characters is well inside the 40 a project name may be.
  */
+export const MAX_PROJECT_NAME = 40;
+
 export function agentProject(runId: string): string {
-  return runId;
+  const stamp = Date.now().toString(36);
+  const room = MAX_PROJECT_NAME - stamp.length - 1;
+  const base = String(runId)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+/, '')
+    .slice(0, room)
+    .replace(/-+$/, '');
+
+  return `${ base || 'vc' }-${ stamp }`;
 }
 
 /**
