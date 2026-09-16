@@ -120,24 +120,41 @@ async function fetchAlerts() {
     'reading the Dependabot alerts',
   );
 
-  return raw.map((a) => ({
-    id:              a.number,
-    library:         a.security_vulnerability?.package?.name || a.dependency?.package?.name || '?',
-    ecosystem:       a.security_vulnerability?.package?.ecosystem || 'npm',
-    ghsa:            a.security_advisory?.ghsa_id || '',
-    cve:             a.security_advisory?.cve_id || null,
-    severity:        severityOf(a.security_advisory?.severity),
-    summary:         a.security_advisory?.summary || '',
-    manifest:        a.dependency?.manifest_path || '',
-    scope:           a.dependency?.scope || '',
-    relationship:    a.dependency?.relationship || '',
-    state:           a.state,
-    vulnerableRange: a.security_vulnerability?.vulnerable_version_range || '',
-    patched:         a.security_vulnerability?.first_patched_version?.identifier || null,
-    url:             a.html_url,
-    createdAt:       a.created_at,
-    fixedAt:         a.fixed_at || null,
-  }));
+  // Trimmed, because this ends up in a ConfigMap and a ConfigMap holds a megabyte. The full
+  // record for all 969 of rancher/dashboard's alerts is 521 KiB, which is half the ceiling on a
+  // list that only grows - so the snapshot carries what the BOARD reads and nothing else:
+  //
+  //   * `url` is derived (`<repo>/security/dependabot/<id>`), not stored.
+  //   * the vulnerable range, scope and relationship are not stored at all. They belong to
+  //     fixing, and the fix prompt already enumerates them from the LIVE alerts rather than the
+  //     snapshot - precisely because a snapshot can be hours old and a manifest list must not be.
+  //   * a CLOSED alert keeps only what the shipped list shows. 959 of the 969 are closed, and
+  //     what they are for is "we fixed this" - not the advisory text.
+  return raw.map((a) => {
+    const open = a.state === 'open';
+    const alert = {
+      id:       a.number,
+      library:  a.security_vulnerability?.package?.name || a.dependency?.package?.name || '?',
+      ghsa:     a.security_advisory?.ghsa_id || '',
+      severity: severityOf(a.security_advisory?.severity),
+      manifest: a.dependency?.manifest_path || '',
+      state:    a.state,
+      patched:  a.security_vulnerability?.first_patched_version?.identifier || null,
+      fixedAt:  a.fixed_at || null,
+    };
+
+    if (!open) {
+      return alert;
+    }
+
+    return {
+      ...alert,
+      ecosystem: a.security_vulnerability?.package?.ecosystem || 'npm',
+      cve:       a.security_advisory?.cve_id || null,
+      summary:   a.security_advisory?.summary || '',
+      createdAt: a.created_at,
+    };
+  });
 }
 
 function normalisePr(pr) {

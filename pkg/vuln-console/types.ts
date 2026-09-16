@@ -9,27 +9,41 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
 export type AlertState = 'open' | 'fixed' | 'dismissed' | 'auto_dismissed';
 
-/** One Dependabot alert. The board's primary key: a library is a grouping of these. */
+/**
+ * One Dependabot alert. The board's primary key: a library is a grouping of these.
+ *
+ * The optional half is carried for OPEN alerts only. rancher/dashboard has around a thousand
+ * alerts and all but a handful are closed, so a snapshot holding the advisory text for every
+ * one of them spends half a ConfigMap saying things the shipped list never shows. What a closed
+ * alert is for is "we fixed this", and the fields above the line are what says it.
+ */
 export interface Alert {
   /** The alert number, unique within the repository. */
   id: number;
   library: string;
-  ecosystem: string;
   ghsa: string;
-  cve: string | null;
   severity: Severity;
-  summary: string;
   /** The lockfile this alert is raised against - one library can have several. */
   manifest: string;
-  scope: string;
-  relationship: string;
   state: AlertState;
-  vulnerableRange: string;
   /** The version that closes it, or null when Dependabot has no fix at all. */
   patched: string | null;
-  url: string;
-  createdAt: string;
   fixedAt: string | null;
+
+  ecosystem?: string;
+  cve?: string | null;
+  summary?: string;
+  createdAt?: string;
+}
+
+/**
+ * Where an alert is read, built rather than stored.
+ *
+ * A thousand of these is 65 KiB of one identical prefix, and the only part that varies is the
+ * number the alert already carries.
+ */
+export function alertUrl(repo: string, id: number): string {
+  return `https://github.com/${ repo }/security/dependabot/${ id }`;
 }
 
 export type PrStatus = 'open' | 'merged' | 'closed';
