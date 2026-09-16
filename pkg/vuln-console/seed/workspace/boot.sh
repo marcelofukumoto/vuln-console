@@ -51,4 +51,7 @@ chown node:node "$SHARED" "$SHARED/yarn" "$SHARED/cypress" "$SHARED/npm" "$SHARE
       ffmpeg jq lsof iproute2 >"$WS/.apt.log" 2>&1 &
 ) || true
 
-exec setpriv --reuid=1000 --regid=1000 --init-groups /bin/sh /seed/checkout.sh
+# /workspace-config, not /seed. This extension's scripts are mounted from its own ConfigMap;
+# /seed is the agents extension's, which is optional here and usually absent - so pointing at it
+# crash-looped the pod with "cannot open /seed/checkout.sh".
+exec setpriv --reuid=1000 --regid=1000 --init-groups /bin/sh /workspace-config/checkout.sh
