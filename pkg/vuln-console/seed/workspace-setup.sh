@@ -42,22 +42,26 @@ stage() {
 # it before any of that has happened fails with `container not found ("workspace")`, which is
 # what the first real run did.
 stage waiting
-echo "workspace-setup.sh: waiting for $NS to come up"
+# Tested by TRYING it, not by reading a status. What this needs is to be able to exec into the
+# container and find the checkout; both readiness conditions available here mean something else.
+# `readyReplicas` and the container's `ready` are both the startup probe, which is the DEV SERVER
+# answering on 8005 - the last thing to start and, for a repository whose dev server does not
+# build, something that may never happen. A fix does not need a dev server to bump a lockfile, so
+# waiting on one would fail every run on such a repository for a reason unrelated to the work.
+echo "workspace-setup.sh: waiting for $NS to be usable"
 i=0
+ok=no
 while [ "$i" -lt 240 ]; do
-  ready=$(kube get deployment "$NS" -n "$NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
-  [ "${ready:-0}" -ge 1 ] 2>/dev/null && break
-  # The dev server is what makes a pod READY, and it is the last thing to start. Being able to
-  # exec is what this actually needs, so a running container is enough to get on with.
-  phase=$(kube get pods -n "$NS" -l "vuln-console.rancher.io/workspace=$NS" \
-    -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="workspace")].ready}' 2>/dev/null || true)
-  [ "$phase" = "true" ] && break
+  if kube exec -n "$NS" "deploy/$NS" -c workspace -- test -d "$WS/src/.git" >/dev/null 2>&1; then
+    ok=yes
+    break
+  fi
   i=$((i + 1))
   sleep 5
 done
 
-if [ "$i" -ge 240 ]; then
-  echo "workspace-setup.sh: $NS did not come up within 20 minutes" >&2
+if [ "$ok" != yes ]; then
+  echo "workspace-setup.sh: $NS did not become usable within 20 minutes" >&2
   exit 2
 fi
 

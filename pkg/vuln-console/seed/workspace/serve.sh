@@ -78,7 +78,7 @@ while :; do
 
   # setsid, so the server and everything it starts are one process group a stop can signal as a
   # whole; tee, so the log is in the tree as well as in the pod's.
-  setsid bash -c 'if [ -f "$RETARGET" ]; then set -a; . "$RETARGET"; set +a; fi; nice -n 15 $IONICE env VUE_CLI_SERVICE_CONFIG_PATH=/workspace-config/vue.config.js yarn dev --port "$PORT" 2>&1 | tee "$LOG"' &
+  setsid bash -c 'if [ -f "$RETARGET" ]; then set -a; . "$RETARGET"; set +a; fi; nice -n 15 $IONICE env VUE_CLI_SERVICE_CONFIG_PATH="$WS/src/.workspace.vue.config.js" yarn dev --port "$PORT" 2>&1 | tee "$LOG"' &
   SERVER=$!
 
   # `sleep & wait`, not `sleep`: a trap runs once the foreground command returns, and a stop

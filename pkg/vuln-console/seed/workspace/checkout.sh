@@ -56,4 +56,17 @@ if [ -n "$HASH" ] && [ -d node_modules ] && [ ! -d "$SHARED/template/$HASH" ]; t
   cp -al node_modules "$SHARED/template/$HASH/node_modules" || rm -rf "$SHARED/template/$HASH"
 fi
 
+# The injected vue config, copied INTO the checkout.
+#
+# vue-cli resolves it with `is-file-esm`, which walks up from the config's own path looking for a
+# package.json to decide whether it is ESM. Pointed at a file in a ConfigMap mount there is no
+# package.json above it, and it dies with "Cannot read properties of undefined (reading
+# 'packageJson')" - which is a dev server that never starts, on every repository.
+#
+# A dotfile so it is invisible to the repository's own tooling, and excluded from git so it can
+# never end up in a fix's diff.
+cp /workspace-config/vue.config.js "$WS/src/.workspace.vue.config.js"
+grep -qxF '.workspace.vue.config.js' "$WS/src/.git/info/exclude" 2>/dev/null \
+  || echo '.workspace.vue.config.js' >> "$WS/src/.git/info/exclude"
+
 exec /bin/bash /workspace-config/serve.sh ${port}
