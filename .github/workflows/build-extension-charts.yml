@@ -24,7 +24,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'pkg/interrupt-duty-reports/package.json'
+      - 'pkg/vuln-console/package.json'
 
 defaults:
   run:
@@ -42,16 +42,16 @@ jobs:
       - uses: actions/checkout@v4
       - id: decide
         run: |
-          version=$(node -p "require('./pkg/interrupt-duty-reports/package.json').version")
+          version=$(node -p "require('./pkg/vuln-console/package.json').version")
           git fetch --depth=1 origin gh-pages 2>/dev/null || true
           if git show origin/gh-pages:index.yaml > /tmp/index.yaml 2>/dev/null; then
             if grep -qE "^[[:space:]]+version: ${version}$" /tmp/index.yaml; then
-              echo "interrupt-duty-reports ${version} is already on gh-pages - nothing to publish"
+              echo "vuln-console ${version} is already on gh-pages - nothing to publish"
               echo "publish=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           fi
-          echo "interrupt-duty-reports ${version} is not published yet"
+          echo "vuln-console ${version} is not published yet"
           echo "publish=true" >> "$GITHUB_OUTPUT"
 
   build-extension-charts:
@@ -76,9 +76,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: A bundle exists for this version
         run: |
-          version=$(node -p "require('./pkg/interrupt-duty-reports/package.json').version")
+          version=$(node -p "require('./pkg/vuln-console/package.json').version")
           git fetch --depth=1 origin gh-pages
-          files=$(git ls-tree -r --name-only origin/gh-pages "extensions/interrupt-duty-reports/${version}/plugin" || true)
+          files=$(git ls-tree -r --name-only origin/gh-pages "extensions/vuln-console/${version}/plugin" || true)
           echo "$files"
           if ! echo "$files" | grep -qE '\.js$'; then
             echo "::error::published ${version} has no JavaScript - the build failed and the publish swallowed it"

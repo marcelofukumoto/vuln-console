@@ -18,12 +18,19 @@ jobs:
       - run: yarn install --frozen-lockfile
       - run: yarn lint
       - run: yarn type-check
-      # The in-pod scripts are written into the agent pod from seed.generated.ts, so an edit
-      # under seed/ that was not regenerated is an edit that never reaches the pod. Regenerating
-      # here and checking for a diff is what catches that.
-      - name: seed.generated.ts is up to date
+      # The in-pod scripts are written into the agent pod from seed.generated.ts and a
+      # workspace is rendered from yaml.generated.ts, so an edit under seed/ or yaml/ that was
+      # not regenerated is an edit that never reaches the cluster. Regenerating here and checking
+      # for a diff is what catches that.
+      #
+      # Name the files explicitly and let the diff cover the whole package: this check spent its
+      # first few commits pointed at a path that did not exist, where `git diff --exit-code` on
+      # nothing is a pass.
+      - name: generated files are up to date
         run: |
+          test -f pkg/vuln-console/seed.generated.ts
+          test -f pkg/vuln-console/yaml.generated.ts
           yarn gen-seed
-          git diff --exit-code -- pkg/interrupt-duty-reports/seed.generated.ts \
-            || { echo "::error::seed.generated.ts is stale - run 'yarn gen-seed' and commit it"; exit 1; }
-      - run: yarn build-pkg interrupt-duty-reports
+          git diff --exit-code -- pkg/vuln-console \
+            || { echo "::error::generated files are stale - run 'yarn gen-seed' and commit them"; exit 1; }
+      - run: yarn build-pkg vuln-console
