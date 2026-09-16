@@ -12,18 +12,18 @@ entries:
       catalog.cattle.io/ui-component: plugins
       catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 5.0.0'
     apiVersion: v2
-    appVersion: 0.2.0
-    created: "2026-09-16T20:11:00.479442415Z"
+    appVersion: 0.2.1
+    created: "2026-09-16T20:14:48.881371021Z"
     description: 'The Dependabot vulnerability board for rancher/dashboard: see what
       is actionable, and fix it in-cluster with an agent'
-    digest: 84d0211623957988fa7d892e3773b100971b18d6e6fd826887c6defcf43fc086
+    digest: fe6b0de816bff288bc9a8f8d6db379fa3bfeb0687f273f0382b6c34cc5844007
     home: https://github.com/marcelofukumoto/vuln-console
     icon: https://marcelofukumoto.github.io/vuln-console/icon.svg
     name: vuln-console
     type: application
     urls:
-    - assets/vuln-console/vuln-console-0.2.0.tgz
-    version: 0.2.0
+    - assets/vuln-console/vuln-console-0.2.1.tgz
+    version: 0.2.1
   - annotations:
       catalog.cattle.io/certified: rancher
       catalog.cattle.io/display-name: Vulnerability Console
@@ -93,4 +93,4 @@ entries:
     urls:
     - https://github.com/marcelofukumoto/vuln-console/releases/download/vuln-console-0.1.0/vuln-console-0.1.0.tgz
     version: 0.1.0
-generated: "2026-09-16T20:11:00.479114826Z"
+generated: "2026-09-16T20:14:48.880314381Z"
