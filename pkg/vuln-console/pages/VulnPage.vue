@@ -175,8 +175,10 @@ async function act(row: VulnGroup, action: JobAction): Promise<void> {
       principalId: principalId.value,
       library:     row.library,
       action,
-      group:   row,
-      by:      store.getters['auth/principal']?.loginName,
+      group:       row,
+      // `auth/principal` is undefined on 2.16; principalId is what is actually on the page, and
+      // it is the same identity the token is stored under.
+      by:          principalId.value,
     });
 
     await reload();
