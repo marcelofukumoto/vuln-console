@@ -43,8 +43,16 @@ const CONVERSATIONS = '/workspace/conversations';
 const AGENT_HOME = '/workspace/.home';
 
 /** The prompt file each action is driven by. */
-/** Written into the agents pod and run there, before the conversation starts. */
+/** Written into the agents pod and run there once the workspace is up. */
 const SETUP_SCRIPT = 'workspace-setup.sh';
+
+/**
+ * How long the workspace is given to become usable.
+ *
+ * A first start is a Bundle render, an image pull, a clone and a yarn install, so minutes rather
+ * than seconds. The script waits in the pod; this is the ceiling on that wait.
+ */
+const WORKSPACE_READY_MS = 22 * 60 * 1000;
 
 const PROMPTS: Record<JobAction, string> = {
   fix:             'fix.prompt.md',
@@ -265,22 +273,12 @@ export async function startAction(options: StartOptions): Promise<Job> {
 
     await writeSeed(target, workspace);
 
-    // Before the agent is asked to do anything: give the workspace a GitHub credential, the gh
-    // CLI, and a fork that exists. Without this the run gets as far as `git push` and stops
-    // with a 403, having done all the work - which is exactly where it is most expensive.
-    await podRunScript(
-      target,
-      [
-        `sh ${ shellQuote(`${ ROOT }/${ SETUP_SCRIPT }`) }`,
-        shellQuote(workspace),
-        shellQuote(board.repo),
-        shellQuote(fork),
-        shellQuote(tokenKey(principalId)),
-      ].join(' '),
-      `prepare the workspace for ${ board.repo }`,
-      300000,
-    );
-
+    // The conversation first, and the workspace afterwards. Starting a conversation only QUEUES
+    // the prompt into the agents pod, which is always up, so it succeeds immediately - and that
+    // is what the button needs to return. The workspace behind it is minutes from usable: Fleet
+    // has to render the Bundle, the kubelet has to pull an image, and the pod then clones the
+    // repository and runs a yarn install. Waiting for all that before answering would be a
+    // button that appears to hang for five minutes.
     const session = await api.agent.startInProject(
       agentProject(`${ workspace }-${ action }-${ now }`),
       `${ VERBS[action] } ${ library }`,
@@ -291,23 +289,49 @@ export async function startAction(options: StartOptions): Promise<Job> {
 
     await writeJob(started);
 
-    // Start the pane detached, with the shell prefix pointing into the workspace. Starting a
-    // conversation only QUEUES the prompt - it is read the first time a pane attaches, and
-    // without this nothing would attach until somebody opened the terminal by hand, which is
-    // not what pressing a button means.
-    await podRunScript(
-      target,
-      [
-        `/bin/sh /seed/shell.sh`,
-        shellQuote(session),
-        shellQuote(CONVERSATIONS),
-        shellQuote(AGENT_HOME),
-        'start',
-        shellQuote(`${ ROOT }/shell-${ workspace }.sh`),
-      ].join(' '),
-      'start the conversation in the agent pod',
-      120000,
-    );
+    // The rest in the background: wait for the workspace, give it a credential and a fork, then
+    // attach the pane so the queued prompt is read. A failure here is recorded on the job rather
+    // than thrown, because the caller has already been answered.
+    void (async() => {
+      try {
+        await podRunScript(
+          target,
+          [
+            `sh ${ shellQuote(`${ ROOT }/${ SETUP_SCRIPT }`) }`,
+            shellQuote(workspace),
+            shellQuote(board.repo),
+            shellQuote(fork),
+            shellQuote(tokenKey(principalId)),
+          ].join(' '),
+          `prepare the workspace for ${ board.repo }`,
+          WORKSPACE_READY_MS,
+        );
+
+        // Start the pane detached, with the shell prefix pointing into the workspace. Without
+        // this nothing attaches until somebody opens the terminal by hand, and the queued prompt
+        // is never read - which is not what pressing a button means.
+        await podRunScript(
+          target,
+          [
+            `/bin/sh /seed/shell.sh`,
+            shellQuote(session),
+            shellQuote(CONVERSATIONS),
+            shellQuote(AGENT_HOME),
+            'start',
+            shellQuote(`${ ROOT }/shell-${ workspace }.sh`),
+          ].join(' '),
+          'start the conversation in the agent pod',
+          120000,
+        );
+      } catch (e: any) {
+        await writeJob({
+          ...started,
+          phase:     'Failed',
+          message:   e?.message || String(e),
+          updatedAt: Date.now(),
+        }).catch(() => undefined);
+      }
+    })();
 
     return started;
   } catch (e: any) {

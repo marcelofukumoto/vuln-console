@@ -26,6 +26,31 @@ WS=/workspaces/$NS
 
 kube() { KUBECONFIG=/dev/null kubectl "$@"; }
 
+# Wait for the workspace to exist before trying to talk to it.
+#
+# A workspace is minutes old before it is usable: Fleet has to render the Bundle, the kubelet has
+# to pull node:24, and boot.sh then clones the repository and runs a yarn install. Exec'ing into
+# it before any of that has happened fails with `container not found ("workspace")`, which is
+# what the first real run did.
+echo "workspace-setup.sh: waiting for $NS to come up"
+i=0
+while [ "$i" -lt 240 ]; do
+  ready=$(kube get deployment "$NS" -n "$NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
+  [ "${ready:-0}" -ge 1 ] 2>/dev/null && break
+  # The dev server is what makes a pod READY, and it is the last thing to start. Being able to
+  # exec is what this actually needs, so a running container is enough to get on with.
+  phase=$(kube get pods -n "$NS" -l "vuln-console.rancher.io/workspace=$NS" \
+    -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="workspace")].ready}' 2>/dev/null || true)
+  [ "$phase" = "true" ] && break
+  i=$((i + 1))
+  sleep 5
+done
+
+if [ "$i" -ge 240 ]; then
+  echo "workspace-setup.sh: $NS did not come up within 20 minutes" >&2
+  exit 2
+fi
+
 secret_key() {
   kube get secret "$2" -n "$1" -o "jsonpath={.data.$3}" 2>/dev/null | base64 -d 2>/dev/null | tr -d '\r\n'
 }
