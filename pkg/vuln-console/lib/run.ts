@@ -27,7 +27,7 @@ import { readJobs, writeJob } from './store';
 import { ensureWorkspace, workspaceName } from './workspace';
 import type { Store } from './workspace';
 import { SEED_FILES } from '../seed.generated';
-import { STALE_RUN_MS, WORKSPACES_ROOT } from '../config/constants';
+import { STALE_RUN_MS, WORKSPACES_ROOT, forkFor, prTargetFor } from '../config/constants';
 import type { Board } from '../config/constants';
 import type { Job, JobAction, VulnGroup } from '../types';
 
@@ -42,6 +42,9 @@ const CONVERSATIONS = '/workspace/conversations';
 const AGENT_HOME = '/workspace/.home';
 
 /** The prompt file each action is driven by. */
+/** Written into the agents pod and run there, before the conversation starts. */
+const SETUP_SCRIPT = 'workspace-setup.sh';
+
 const PROMPTS: Record<JobAction, string> = {
   fix:             'fix.prompt.md',
   pr:              'pr.prompt.md',
@@ -89,10 +92,13 @@ function shellWrapper(workspace: string): string {
     `NS=${ shellQuote(workspace) }`,
     `WS=${ shellQuote(`${ WORKSPACES_ROOT }/${ workspace }`) }`,
     'DIR=${PWD}',
+    // `$WS/bin` first so the gh installed by workspace-setup.sh wins, and `.env` sourced so
+    // every command the agent runs has GH_TOKEN - which is what makes `gh` and `git push` work
+    // at all. `set -a` exports what the file sets; the file is 0600 and holds the token.
     'KUBECONFIG=/dev/null exec kubectl exec -i -n "$NS" "deploy/$NS" -c workspace -- \\',
     '  setpriv --reuid=1000 --regid=1000 --init-groups \\',
     '  /usr/bin/env HOME="$WS/.home" WSD="$WS" DIR="$DIR" \\',
-    '  /bin/bash -lc \'cd "$DIR" 2>/dev/null || cd "$WSD/dashboard"; PATH="$WSD/bin:$PATH"; eval "$1"\' bash "$1"',
+    '  /bin/bash -lc \'cd "$DIR" 2>/dev/null || cd "$WSD/src"; PATH="$WSD/bin:$PATH"; if [ -f "$WSD/.env" ]; then set -a; . "$WSD/.env"; set +a; fi; eval "$1"\' bash "$1"',
     '',
   ].join('\n');
 }
@@ -107,7 +113,15 @@ function shellWrapper(workspace: string): string {
  *
  * It carries no credentials. The workspace resolves its own.
  */
-function openingPrompt(action: JobAction, board: Board, library: string, group: VulnGroup | null, job: Job): string {
+function openingPrompt(
+  action: JobAction,
+  board: Board,
+  fork: string,
+  prTarget: string,
+  library: string,
+  group: VulnGroup | null,
+  job: Job,
+): string {
   const alerts = (group?.vulns || [])
     .filter((v) => v.state === 'open')
     .map((v) => `#${ v.id } (${ v.severity }${ v.patched ? `, needs ${ v.patched }` : ', no fix published' }) in ${ v.manifest }`);
@@ -121,10 +135,10 @@ function openingPrompt(action: JobAction, board: Board, library: string, group: 
     'Facts for this run:',
     `  library        ${ library }`,
     `  workspace      ${ job.workspace } (your commands already run inside it)`,
-    `  checkout       ${ WORKSPACES_ROOT }/${ job.workspace }/dashboard`,
+    `  checkout       ${ WORKSPACES_ROOT }/${ job.workspace }/src`,
     `  repository     ${ board.repo }`,
-    `  push to        ${ board.fork } (remote "fork")`,
-    `  pull requests  ${ board.prTarget }`,
+    `  push to        ${ fork } (remote "fork")`,
+    `  pull requests  ${ prTarget }`,
     job.branch ? `  branch         ${ job.branch }` : '',
     job.prNumber ? `  pull request   ${ job.prNumber }` : '',
     alerts.length ? `  open alerts    ${ alerts.join('; ') }` : '',
@@ -149,7 +163,7 @@ function openingPrompt(action: JobAction, board: Board, library: string, group: 
  * this bundle carries.
  */
 async function writeSeed(target: PodRef, workspace: string): Promise<void> {
-  const wanted = ['job.sh', ...Object.values(PROMPTS)];
+  const wanted = ['job.sh', SETUP_SCRIPT, ...Object.values(PROMPTS)];
 
   for (const name of wanted) {
     const content = SEED_FILES[name];
@@ -171,6 +185,8 @@ async function writeSeed(target: PodRef, workspace: string): Promise<void> {
 export interface StartOptions {
   store: Store;
   board: Board;
+  /** The account the stored token belongs to, from the gather. Decides the fork. */
+  tokenLogin: string;
   library: string;
   action: JobAction;
   group?: VulnGroup | null;
@@ -187,7 +203,14 @@ export interface StartOptions {
  * be fixed at once; two runs on ONE library still cannot.
  */
 export async function startAction(options: StartOptions): Promise<Job> {
-  const { store, board, library, action, group = null, by } = options;
+  const { store, board, tokenLogin, library, action, group = null, by } = options;
+  const fork = forkFor(board, tokenLogin);
+  const prTarget = prTargetFor(board, tokenLogin);
+
+  if (!fork) {
+    throw new Error('There is no fork to push to: the board sets none and the stored token\'s account is not known yet. Refresh the board first.');
+  }
+
   const api = agentsApi();
 
   if (!api) {
@@ -239,10 +262,25 @@ export async function startAction(options: StartOptions): Promise<Job> {
 
     await writeSeed(target, workspace);
 
+    // Before the agent is asked to do anything: give the workspace a GitHub credential, the gh
+    // CLI, and a fork that exists. Without this the run gets as far as `git push` and stops
+    // with a 403, having done all the work - which is exactly where it is most expensive.
+    await podRunScript(
+      target,
+      [
+        `sh ${ shellQuote(`${ ROOT }/${ SETUP_SCRIPT }`) }`,
+        shellQuote(workspace),
+        shellQuote(board.repo),
+        shellQuote(fork),
+      ].join(' '),
+      `prepare the workspace for ${ board.repo }`,
+      300000,
+    );
+
     const session = await api.agent.startInProject(
       agentProject(`${ workspace }-${ action }-${ now }`),
       `${ VERBS[action] } ${ library }`,
-      openingPrompt(action, board, library, group, { ...job, workspace }),
+      openingPrompt(action, board, fork, prTarget, library, group, { ...job, workspace }),
     );
 
     const started: Job = { ...job, workspace, sessionId: session, updatedAt: Date.now() };

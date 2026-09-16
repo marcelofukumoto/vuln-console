@@ -15,7 +15,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const REPO = process.env.VULN_REPO || 'rancher/dashboard';
-const FORK_OWNER = process.env.FORK_OWNER || 'marcelofukumoto';
 
 /**
  * The package this repository gets most of its tree from, if it has one.
@@ -202,8 +201,26 @@ function videoIn(body) {
  * Both fields it adds are load-bearing: a closed alert is attributed to a merge by TIMING, and
  * the branch is the fallback when a title says nothing.
  */
-async function fetchOurPulls() {
-  const query = `repo:${ REPO } author:${ FORK_OWNER } is:pr`;
+/**
+ * Who the stored token belongs to.
+ *
+ * Everything "ours" is defined by this and not by a name written into the extension: our pull
+ * requests are the ones this account authored, and our fork is this account's fork. A hard-coded
+ * login makes an extension that works for exactly one person and fails at `git push` for
+ * everybody else, three minutes into a run.
+ */
+async function tokenOwner() {
+  const { body } = await request(`${ API }/user`, 'identifying the stored token');
+
+  if (!body?.login) {
+    throw new Error('identifying the stored token: the answer carried no login');
+  }
+
+  return body.login;
+}
+
+async function fetchOurPulls(owner) {
+  const query = `repo:${ REPO } author:${ owner } is:pr`;
   const found = [];
   let cursor = null;
 
@@ -444,10 +461,12 @@ async function ownedLibraries() {
 }
 
 async function main() {
+  // First, because everything "ours" is defined by it.
+  const owner = await tokenOwner();
   const [alerts, dependabotPrs, ourPrs, owned] = await Promise.all([
     fetchAlerts(),
     fetchDependabotPulls(),
-    fetchOurPulls(),
+    fetchOurPulls(owner),
     // Never fatal: a board that cannot read its own lockfile is a board with no owner
     // information, which is the same board it was before this existed - not a failed gather.
     ownedLibraries().catch((e) => {
@@ -472,6 +491,7 @@ async function main() {
   const snapshot = {
     gatheredAt: new Date().toISOString(),
     repo:       REPO,
+    tokenLogin: owner,
     alerts,
     dependabotPrs,
     ourPrs,
@@ -491,7 +511,7 @@ async function main() {
     : '';
 
   process.stderr.write(
-    `gather: ${ alerts.length } alerts (${ open } open), ${ dependabotPrs.length } Dependabot pull requests, ${ ourPrs.length } of ours${ owns } -> ${ OUT }\n`,
+    `gather: ${ alerts.length } alerts (${ open } open), ${ dependabotPrs.length } Dependabot pull requests, ${ ourPrs.length } by ${ owner }${ owns } -> ${ OUT }\n`,
   );
 }
 

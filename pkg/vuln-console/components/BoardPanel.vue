@@ -20,6 +20,7 @@ import { buildLedger, mergedButStillOpen, severityRank, severityStatus } from '.
 import { readJobs, readSnapshot } from '../lib/store';
 import { isStalled } from '../lib/run';
 import { elapsedLabel, runPhase } from '../lib/format';
+import { forkFor } from '../config/constants';
 import type { Board } from '../config/constants';
 import type { Job, JobAction, Ledger, Snapshot, VulnGroup } from '../types';
 
@@ -30,7 +31,9 @@ const emit = defineEmits<{
   (e: 'stop', job: Job | null): void;
   (e: 'session', job: Job | null): void;
   (e: 'shipped', rows: VulnGroup[]): void;
-  (e: 'loaded', payload: { board: string; rows: VulnGroup[]; jobs: Job[]; hasSnapshot: boolean }): void;
+  (e: 'loaded', payload: {
+    board: string; rows: VulnGroup[]; jobs: Job[]; hasSnapshot: boolean; tokenLogin: string;
+  }): void;
 }>();
 
 const snapshot = ref<Snapshot | null>(null);
@@ -105,7 +108,11 @@ async function load(): Promise<void> {
   loading.value = false;
 
   emit('loaded', {
-    board: props.board.id, rows: rows.value, jobs: allJobs, hasSnapshot: !!snap,
+    board:      props.board.id,
+    rows:       rows.value,
+    jobs:       allJobs,
+    hasSnapshot: !!snap,
+    tokenLogin: snap?.tokenLogin || '',
   });
 }
 
@@ -202,6 +209,14 @@ onUnmounted(() => {
 
         <span class="board__stamp">
           gathered {{ new Date(snapshot.gatheredAt).toLocaleString() }}
+          <template v-if="snapshot.tokenLogin">
+            · fixes push to
+            <a
+              :href="`https://github.com/${ forkFor(board, snapshot.tokenLogin) }`"
+              target="_blank"
+              rel="noopener"
+            >{{ forkFor(board, snapshot.tokenLogin) }}</a>
+          </template>
         </span>
       </div>
 
@@ -271,7 +286,7 @@ onUnmounted(() => {
             <StepPills
               :row="row"
               :job="row.job"
-              :fork="board.fork"
+              :fork="forkFor(board, snapshot?.tokenLogin || '')"
               :owner-package="snapshot?.ownerPackage"
               :owner-version="snapshot?.ownerVersion"
               :busy="false"

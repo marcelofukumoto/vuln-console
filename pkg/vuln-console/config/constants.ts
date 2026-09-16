@@ -22,15 +22,25 @@ export interface Board {
   id: string;
   label: string;
   repo: string;
-  /** Where branches are pushed. */
-  fork: string;
+  /**
+   * Where branches are pushed — an override, not the usual case.
+   *
+   * Normally left unset and DERIVED from the stored token: the fork is `<token owner>/<repo>`,
+   * because the account that owns the token is the only account that can push. Hard-coding a
+   * fork means an extension that only works for whoever wrote it, and fails at `git push` with
+   * a 403 for everybody else - after doing all the work.
+   *
+   * Set it only to push somewhere that is not the token owner's own fork.
+   */
+  fork?: string;
   /**
    * Where pull requests are opened.
    *
-   * The fork, for now. Branches and pull requests are made there first so a mistake costs
-   * nothing; moving a board to its upstream is changing this one field.
+   * Unset means the fork, which is where they go for now: branches and pull requests are made
+   * there first so a mistake costs nothing. Moving a board to its upstream is setting this to
+   * the upstream.
    */
-  prTarget: string;
+  prTarget?: string;
 
   /**
    * The package this repository gets most of its tree from, if it has one.
@@ -49,24 +59,40 @@ export interface Board {
 
 export const BOARDS: Board[] = [
   {
-    id:       'dashboard',
-    label:    'Dashboard',
-    repo:     'rancher/dashboard',
-    fork:     'marcelofukumoto/dashboard',
-    prTarget: 'marcelofukumoto/dashboard',
+    id:    'dashboard',
+    label: 'Dashboard',
+    repo:  'rancher/dashboard',
   },
   {
     id:           'rancher-ai-ui',
     label:        'Rancher AI UI',
     repo:         'rancher/rancher-ai-ui',
-    fork:         'marcelofukumoto/rancher-ai-ui',
-    prTarget:     'marcelofukumoto/rancher-ai-ui',
     ownerPackage: '@rancher/shell',
   },
 ];
 
 export function boardById(id: string): Board {
   return BOARDS.find((b) => b.id === id) || BOARDS[0];
+}
+
+/** The repository's short name: `rancher/dashboard` -> `dashboard`. */
+export function repoName(repo: string): string {
+  return repo.split('/').pop() || repo;
+}
+
+/**
+ * Where this board's branches go, given who owns the stored token.
+ *
+ * The board's own `fork` wins when it has one; otherwise the token owner's fork of the same
+ * repository. A fork is not assumed to exist - the workspace setup creates it if it is missing,
+ * which is one API call and saves a failure three minutes into a run.
+ */
+export function forkFor(board: Board, tokenLogin: string): string {
+  return board.fork || (tokenLogin ? `${ tokenLogin }/${ repoName(board.repo) }` : '');
+}
+
+export function prTargetFor(board: Board, tokenLogin: string): string {
+  return board.prTarget || forkFor(board, tokenLogin);
 }
 
 /** The Secret holding the GitHub token, and the key inside it. */

@@ -47,6 +47,8 @@ const activeBoard = ref(BOARDS[0].id);
 
 /** What each board last reported, so the header's actions can act on the visible one. */
 const boardRows = ref<Record<string, VulnGroup[]>>({});
+/** Which account each board's gather saw the token belonging to — that account owns the fork. */
+const boardTokenLogin = ref<Record<string, string>>({});
 const panels = ref<Record<string, any>>({});
 
 const board = computed(() => boardById(activeBoard.value));
@@ -55,8 +57,9 @@ const ready = computed(() => agents.value.state === 'ready'
   && credentialsReady(credentials.value)
   && appsPlusInstalled(store));
 
-function onLoaded(payload: { board: string; rows: VulnGroup[] }): void {
+function onLoaded(payload: { board: string; rows: VulnGroup[]; tokenLogin: string }): void {
   boardRows.value = { ...boardRows.value, [payload.board]: payload.rows };
+  boardTokenLogin.value = { ...boardTokenLogin.value, [payload.board]: payload.tokenLogin };
 }
 
 /**
@@ -159,8 +162,9 @@ async function act(row: VulnGroup, action: JobAction): Promise<void> {
   try {
     const job = await startAction({
       store,
-      board:   board.value,
-      library: row.library,
+      board:      board.value,
+      tokenLogin: boardTokenLogin.value[activeBoard.value] || '',
+      library:    row.library,
       action,
       group:   row,
       by:      store.getters['auth/principal']?.loginName,

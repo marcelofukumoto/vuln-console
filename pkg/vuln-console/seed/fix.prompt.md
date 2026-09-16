@@ -9,9 +9,11 @@ request** — that is a separate button and a separate run.
 Every command you run lands inside this fix's workspace, at the path it already has. You do not
 need to `kubectl exec`, `ssh` or `cd` anywhere unusual; `yarn`, `git` and `node` are simply there.
 
-- the checkout is `$WSD/dashboard`, on the repository's default branch
-- `origin` is the upstream repository, `fork` is where branches are pushed
-- `gh` and `jq` are on `$PATH`, and `gh` is already authenticated
+- the checkout is `$WSD/src`, on the repository's default branch
+- `origin` is the upstream repository, `fork` is where branches are pushed. The fork belongs to
+  whoever owns the stored token, and it has been created already if it did not exist
+- `gh` and `jq` are on `$PATH`, `GH_TOKEN` is in the environment of every command you run, and
+  git has a credential helper — so `gh` and `git push` work without you setting anything up
 - the dev server is **already running** and supervised. Never start a second one — the pod's
   memory limit fits one, and two have OOM-killed the container out from under a run. Its URL is
   in the job; a branch you check out is serving within a minute or two of compiling.

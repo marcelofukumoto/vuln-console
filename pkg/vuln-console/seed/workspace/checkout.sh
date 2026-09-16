@@ -15,9 +15,9 @@ export npm_config_cache="$SHARED/npm"
 # is not reliably empty: the agent seed writes `.claude` into the checkout, and if that lands
 # first - a separate trigger racing this boot - a clone would fail and leave the pod serving
 # nothing.
-if [ ! -d "$WS/dashboard/.git" ]; then
-  mkdir -p "$WS/dashboard"
-  cd "$WS/dashboard"
+if [ ! -d "$WS/src/.git" ]; then
+  mkdir -p "$WS/src"
+  cd "$WS/src"
   git init -q
   git remote add origin https://github.com/${repo} 2>/dev/null || true
   DEFAULT=$(git ls-remote --symref origin HEAD | sed -n 's@^ref: refs/heads/\(.*\)[[:space:]]HEAD@\1@p')
@@ -25,7 +25,7 @@ if [ ! -d "$WS/dashboard/.git" ]; then
   git checkout -f -B "$DEFAULT" FETCH_HEAD
 fi
 
-cd "$WS/dashboard"
+cd "$WS/src"
 
 # The fork is where fixes are pushed, so it is a remote from the start rather than something the
 # agent has to remember to add. `upstream` is what a branch is diffed against - never the fork's

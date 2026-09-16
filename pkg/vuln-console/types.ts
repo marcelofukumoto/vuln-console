@@ -65,6 +65,8 @@ export interface PullRequest {
 export interface Snapshot {
   gatheredAt: string;
   repo: string;
+  /** The GitHub account the stored token belongs to — who "ours" means. */
+  tokenLogin: string;
   alerts: Alert[];
   /** Dependabot's own open pull requests, so the board can show "there is already one". */
   dependabotPrs: PullRequest[];

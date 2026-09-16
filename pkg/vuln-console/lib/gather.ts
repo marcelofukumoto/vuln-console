@@ -70,7 +70,7 @@ export async function refreshSnapshot(board: Board): Promise<void> {
       shellQuote(dir),
       shellQuote(board.id),
       shellQuote(board.repo),
-      shellQuote(board.fork.split('/')[0]),
+      shellQuote(board.ownerPackage || ''),
     ].join(' '),
     `gather the Dependabot alerts for ${ board.repo }`,
     GATHER_TIMEOUT_MS,

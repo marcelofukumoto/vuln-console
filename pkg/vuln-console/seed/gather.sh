@@ -10,15 +10,14 @@
 # written through the exec socket is a token the browser held; read here, with the pod's own
 # ServiceAccount, at the moment it is needed, the browser never has it at all.
 #
-# usage: gather.sh <work-dir> <board-id> <repo> <fork-owner> [owner-package]
+# usage: gather.sh <work-dir> <board-id> <repo> [owner-package]
 set -e
 
 DIR=${1:?gather.sh needs a working directory}
 BOARD=${2:?gather.sh needs a board id}
 REPO=${3:?gather.sh needs a repository}
-FORK_OWNER=${4:?gather.sh needs a fork owner}
 # Optional: the package this repository gets most of its tree from. Empty for one that is its own.
-OWNER_PACKAGE=${5:-}
+OWNER_PACKAGE=${4:-}
 SEED=$(dirname "$0")
 
 [ -d "$DIR" ] || { echo "gather.sh: no such directory: $DIR" >&2; exit 2; }
@@ -67,8 +66,8 @@ GH_TOKEN="$GH_TOKEN" node -e \
   'require("fs").writeFileSync(process.argv[1], JSON.stringify({ GH_TOKEN: process.env.GH_TOKEN }))' \
   "$CREDS"
 
-CREDS_FILE="$CREDS" OUT="$SNAPSHOT" VULN_REPO="$REPO" FORK_OWNER="$FORK_OWNER" \
-  OWNER_PACKAGE="$OWNER_PACKAGE" node "$SEED/gather.mjs"
+CREDS_FILE="$CREDS" OUT="$SNAPSHOT" VULN_REPO="$REPO" OWNER_PACKAGE="$OWNER_PACKAGE" \
+  node "$SEED/gather.mjs"
 
 cleanup
 
