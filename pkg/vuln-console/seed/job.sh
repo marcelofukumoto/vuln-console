@@ -66,6 +66,20 @@ UPDATED=$(CURRENT="$CURRENT" LIBRARY="$LIBRARY" BOARD="$BOARD" node -e '
     }
   }
 
+  // A phase the board does not know is worse than no phase at all: "is this running" is
+  // `phase === "Running"`, so an invented value makes a live run look finished and the board
+  // offers its buttons again while an agent is still working. Progress belongs in `stage`,
+  // which is free-form on purpose.
+  const PHASES = ["Running", "Fixed", "Done", "Failed", "Cancelled"];
+
+  if (job.phase && !PHASES.includes(job.phase)) {
+    process.stderr.write(
+      `job.sh: "${ job.phase }" is not a phase. Use one of ${ PHASES.join(", ") } - and for ` +
+      `progress use stage=<what you are doing> instead, which is free-form.\n`,
+    );
+    process.exit(2);
+  }
+
   job.updatedAt = Date.now();
   process.stdout.write(JSON.stringify(job));
 ' "$@")

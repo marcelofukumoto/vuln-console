@@ -212,3 +212,12 @@ the feature is worse than the advisory.
 - do not touch any repository other than the checkout in your workspace
 - do not start a second dev server
 - do not install a browser or a copy of playwright — one of each is already here
+
+## Recording what happened
+
+`phase` is one of exactly five words: **Running, Fixed, Done, Failed, Cancelled**. job.sh refuses
+anything else, because the board reads `phase` to decide whether a run is still going — an
+invented value makes a live run look finished and the row offers its buttons again.
+
+For progress, use `stage=<what you are doing>`, which is free-form and is what the board shows
+while it waits.

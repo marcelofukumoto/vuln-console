@@ -23,3 +23,12 @@ $ROOT/job.sh "<library>" phase=Done message="<one line: rebased onto <sha>, lock
 - do not force-push any branch other than this one
 - do not comment on the pull request
 - do not mark it ready for review
+
+## Recording what happened
+
+`phase` is one of exactly five words: **Running, Fixed, Done, Failed, Cancelled**. job.sh refuses
+anything else, because the board reads `phase` to decide whether a run is still going — an
+invented value makes a live run look finished and the row offers its buttons again.
+
+For progress, use `stage=<what you are doing>`, which is free-form and is what the board shows
+while it waits.

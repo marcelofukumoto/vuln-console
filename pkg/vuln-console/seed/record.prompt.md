@@ -72,3 +72,12 @@ If the dev server does not serve for this repository, say so plainly and record 
 check instead. An honest "not verifiable in a browser here" beats a video of nothing.
 
 Do not change the branch, do not open or edit a pull request.
+
+## Recording what happened
+
+`phase` is one of exactly five words: **Running, Fixed, Done, Failed, Cancelled**. job.sh refuses
+anything else, because the board reads `phase` to decide whether a run is still going — an
+invented value makes a live run look finished and the row offers its buttons again.
+
+For progress, use `stage=<what you are doing>`, which is free-form and is what the board shows
+while it waits.

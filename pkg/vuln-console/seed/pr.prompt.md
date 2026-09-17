@@ -53,3 +53,12 @@ $ROOT/job.sh "<library>" phase=Done prUrl=<url> prNumber=<n> vulnIds=<id,id,id>
 - do not mark it ready for review
 - do not merge it
 - do not comment on it
+
+## Recording what happened
+
+`phase` is one of exactly five words: **Running, Fixed, Done, Failed, Cancelled**. job.sh refuses
+anything else, because the board reads `phase` to decide whether a run is still going — an
+invented value makes a live run look finished and the row offers its buttons again.
+
+For progress, use `stage=<what you are doing>`, which is free-form and is what the board shows
+while it waits.

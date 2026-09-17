@@ -159,6 +159,21 @@ export async function writeSnapshot(board: string, snapshot: Snapshot): Promise<
  * only in the sense that the job carries its own `library` field - the name is an address, not
  * the record.
  */
+/**
+ * A phase the board does not know means the run is still going.
+ *
+ * Jobs are written by an agent, and an agent can invent a value - one wrote `Recording` for
+ * "still recording". Treating that as finished is the dangerous reading: the row shows its
+ * buttons again and somebody starts a second run on top of the first. Treating it as in flight
+ * is merely conservative, and `stage` carries the detail anyway. job.sh rejects them at the
+ * source; this is the belt to that brace, for anything already written.
+ */
+const PHASES = ['Running', 'Fixed', 'Done', 'Failed', 'Cancelled'];
+
+function normalisePhase(job: Job): Job {
+  return PHASES.includes(job.phase) ? job : { ...job, phase: 'Running' };
+}
+
 export function slug(value: string): string {
   return value
     .toLowerCase()
@@ -184,7 +199,8 @@ export async function readJobs(board: string): Promise<Job[]> {
         return null;
       }
     })
-    .filter((job: Job | null): job is Job => !!job?.library);
+    .filter((job: Job | null): job is Job => !!job?.library)
+    .map(normalisePhase);
 }
 
 export async function writeJob(job: Job): Promise<void> {
