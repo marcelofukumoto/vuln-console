@@ -20,7 +20,7 @@
 // same split the agents and Extension Studio extensions make for the same reason.
 import { NAMESPACE, BROWSER_CDP_PORT, BROWSER_PORT } from '../config/constants';
 import { STEVE_BASE, rancherFetch } from './rancher';
-import { userSlug } from './credentials';
+import { userDnsSlug } from './credentials';
 import { SEED_FILES } from '../seed.generated';
 
 const SERVICES_CONFIGMAP = 'gh-browser-services';
@@ -28,7 +28,7 @@ const OWNER_LABEL = 'vuln-console.rancher.io/gh-browser';
 
 /** Where one person's browser lives. One object name, derived from their principal. */
 export function ghBrowserName(principalId: string): string {
-  return `gh-browser-${ userSlug(principalId) }`.slice(0, 63).replace(/-+$/, '');
+  return `gh-browser-${ userDnsSlug(principalId) }`.slice(0, 63).replace(/-+$/, '');
 }
 
 /**
@@ -91,16 +91,16 @@ function deploymentBody(principalId: string): Record<string, unknown> {
     apiVersion: 'apps/v1',
     kind:       'Deployment',
     metadata:   {
-      name, namespace: NAMESPACE, labels: { [OWNER_LABEL]: userSlug(principalId) },
+      name, namespace: NAMESPACE, labels: { [OWNER_LABEL]: userDnsSlug(principalId) },
     },
     spec: {
       replicas: 1,
-      selector: { matchLabels: { [OWNER_LABEL]: userSlug(principalId) } },
+      selector: { matchLabels: { [OWNER_LABEL]: userDnsSlug(principalId) } },
       // Recreate, not RollingUpdate: two Chromiums sharing one profile directory is a browser
       // that will not start, and the second one wins the race often enough to look intermittent.
       strategy: { type: 'Recreate' },
       template: {
-        metadata: { labels: { [OWNER_LABEL]: userSlug(principalId) } },
+        metadata: { labels: { [OWNER_LABEL]: userDnsSlug(principalId) } },
         spec:     {
           containers: [{
             name:  'browser',
@@ -161,7 +161,7 @@ function deploymentBody(principalId: string): Record<string, unknown> {
             { name: 'dshm', emptyDir: { medium: 'Memory', sizeLimit: '1Gi' } },
             {
               name:     'profile',
-              hostPath: { path: `/var/lib/rancher/vuln-console-browsers/${ userSlug(principalId) }`, type: 'DirectoryOrCreate' },
+              hostPath: { path: `/var/lib/rancher/vuln-console-browsers/${ userDnsSlug(principalId) }`, type: 'DirectoryOrCreate' },
             },
             // 0555: the image execs these, so they have to arrive executable.
             { name: 'services', configMap: { name: SERVICES_CONFIGMAP, defaultMode: 0o555 } },
@@ -180,7 +180,7 @@ function serviceBody(principalId: string): Record<string, unknown> {
     kind:       'Service',
     metadata:   { name, namespace: NAMESPACE },
     spec:       {
-      selector: { [OWNER_LABEL]: userSlug(principalId) },
+      selector: { [OWNER_LABEL]: userDnsSlug(principalId) },
       ports:    [
         { name: 'http', port: BROWSER_PORT, targetPort: 'http' },
         { name: 'cdp', port: BROWSER_CDP_PORT, targetPort: 'cdp' },

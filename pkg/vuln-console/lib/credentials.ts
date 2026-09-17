@@ -52,6 +52,23 @@ export function userSlug(principalId: string): string {
     .slice(0, 200) || 'unknown';
 }
 
+/**
+ * The same principal as an object NAME.
+ *
+ * `userSlug` is shaped for Secret data keys, which allow `_`, `.` and capitals; a resource name
+ * is DNS-1123 and allows none of them. `github_user://4140586` is a real principal on this
+ * Rancher and its underscore is what the apiserver rejects, so a name gets its own narrower
+ * spelling rather than the key one. For principals that contain neither - `local://user-qncms` -
+ * the two agree, which is why the difference went unnoticed until a GitHub login pressed Setup.
+ */
+export function userDnsSlug(principalId: string): string {
+  return String(principalId || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 200) || 'unknown';
+}
+
 /** The Secret key holding one user's GitHub token. */
 export function tokenKey(principalId: string): string {
   return `${ GH_TOKEN_KEY }-${ userSlug(principalId) }`;
