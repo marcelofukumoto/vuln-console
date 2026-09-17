@@ -38,6 +38,7 @@ const base = require(require('path').join(process.cwd(), 'vue.config.js'));
 base.publicPath = 'auto';
 
 const previousChainWebpack = base.chainWebpack;
+const previousSetupMiddlewares = base.devServer && base.devServer.setupMiddlewares;
 
 base.chainWebpack = (webpackConfig) => {
   if (typeof previousChainWebpack === 'function') {
@@ -76,25 +77,47 @@ base.devServer = {
   // The prefix is stripped before a request lands here, so everything is served from the root.
   devMiddleware: { publicPath: '/' },
 
-  // Two static roots. The first is the checkout's own `public/`, as before.
+  static: { publicPath: '/' },
+
+  // Where a verification recording is WATCHED.
   //
-  // The second is where a verification recording is WATCHED. A run writes its mp4 and its notes
-  // into the workspace's `artifacts/`, and that directory is inside a pod - a path nobody can
-  // open. Serving it here makes it a link, because this server is already reachable through the
-  // Rancher proxy with the session of whoever is looking: no second server, no ingress, no
-  // certificate and no credential. Served rather than copied into `public/`, so there is one
-  // copy of a two-megabyte file and nothing that can end up in a fix's diff.
+  // A run writes its mp4 and its notes into the workspace's `artifacts/`, which is a path
+  // inside a pod - not something anybody can open. Serving that directory makes it a link,
+  // because this server is already reachable through the Rancher proxy with the session of
+  // whoever is looking: no second server, no ingress, no certificate and no credential. Served
+  // where it lies rather than copied into `public/`, so there is one copy of a two-megabyte
+  // file and nothing that can end up in a fix\'s diff.
   //
-  // `watch: false` deliberately: this is where recordings land, and a dev server that watches
-  // it rebuilds the dashboard every time a run writes a frame.
-  static: [
-    { publicPath: '/' },
-    {
-      directory:  require('path').join(process.env.WS || require('path').join(process.cwd(), '..'), 'artifacts'),
-      publicPath: '/vc-artifacts',
-      watch:      false,
-    },
-  ],
+  // Through `setupMiddlewares` rather than a second `static` entry. vue-cli deep-merges this
+  // object into its own defaults, and an array merged onto their `static` object becomes an
+  // object with the keys `0` and `1` - which webpack-dev-server rejects outright, taking the
+  // dev server down with it. A middleware is not merged.
+  //
+  // `express.static` rather than a hand-written handler, for byte ranges: without them a video
+  // cannot be seeked, and some browsers will not start playing one at all. It is
+  // webpack-dev-server\'s own dependency, so it is always present.
+  setupMiddlewares: (middlewares, devServer) => {
+    const merged = typeof previousSetupMiddlewares === 'function'
+      ? previousSetupMiddlewares(middlewares, devServer)
+      : middlewares;
+
+    try {
+      const path = require('path');
+      const directory = path.join(process.env.WS || path.join(process.cwd(), '..'), 'artifacts');
+
+      merged.unshift({
+        name:       'vc-artifacts',
+        path:       '/vc-artifacts',
+        middleware: require('express').static(directory, { fallthrough: true }),
+      });
+    } catch (e) {
+      // The dashboard is what this server is for; a recording that cannot be watched is worth
+      // saying out loud and not worth refusing to start over.
+      console.error('[workspace] artifacts are not being served:', e.message);
+    }
+
+    return merged;
+  },
 
   // A deep link into the dashboard has to load the app rather than 404. disableDotRule matters
   // in Rancher, where a route routinely carries a resource name with dots in it.
