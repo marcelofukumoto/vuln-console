@@ -12,17 +12,40 @@ entries:
       catalog.cattle.io/ui-component: plugins
       catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 5.0.0'
     apiVersion: v2
-    appVersion: 0.16.0
-    created: "2026-09-17T12:51:11.037843884Z"
+    appVersion: 0.16.1
+    created: "2026-09-17T13:07:12.295588323Z"
     description: 'The Dependabot vulnerability board for rancher/dashboard: see what
       is actionable, and fix it in-cluster with an agent'
-    digest: 115bc8056040f687edc9eb5e9fca5ee94e5fa51cb54f5b6a756758f1ddbf68da
+    digest: 2786dff64325ceaf164c1e0066d29beda4c592b0d38fb9e1cc8bb6c76d2abc0a
     home: https://github.com/marcelofukumoto/vuln-console
     icon: https://marcelofukumoto.github.io/vuln-console/icon.svg
     name: vuln-console
     type: application
     urls:
-    - assets/vuln-console/vuln-console-0.16.0.tgz
+    - assets/vuln-console/vuln-console-0.16.1.tgz
+    version: 0.16.1
+  - annotations:
+      catalog.cattle.io/certified: rancher
+      catalog.cattle.io/display-name: Vulnerability Console
+      catalog.cattle.io/namespace: cattle-ui-plugin-system
+      catalog.cattle.io/os: linux
+      catalog.cattle.io/permits-os: linux, windows
+      catalog.cattle.io/rancher-version: '>= 2.10.0'
+      catalog.cattle.io/scope: management
+      catalog.cattle.io/ui-component: plugins
+      catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 5.0.0'
+    apiVersion: v2
+    appVersion: 0.16.0
+    created: "2026-09-17T12:51:38.901503068Z"
+    description: 'The Dependabot vulnerability board for rancher/dashboard: see what
+      is actionable, and fix it in-cluster with an agent'
+    digest: 159d0c1f8593a63f9fda2ea99644ddfa02a6912df606c5ee5537dc6d712dc204
+    home: https://github.com/marcelofukumoto/vuln-console
+    icon: https://marcelofukumoto.github.io/vuln-console/icon.svg
+    name: vuln-console
+    type: application
+    urls:
+    - https://github.com/marcelofukumoto/vuln-console/releases/download/vuln-console-0.16.0/vuln-console-0.16.0.tgz
     version: 0.16.0
   - annotations:
       catalog.cattle.io/certified: rancher
@@ -599,4 +622,4 @@ entries:
     urls:
     - https://github.com/marcelofukumoto/vuln-console/releases/download/vuln-console-0.1.0/vuln-console-0.1.0.tgz
     version: 0.1.0
-generated: "2026-09-17T12:51:11.037448572Z"
+generated: "2026-09-17T13:07:12.295143036Z"
