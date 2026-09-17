@@ -1,4 +1,7 @@
 #!/bin/bash
+# Adapted from the Dev extension's `WORKSPACE_SERVE`. The supervision model - restart on exit,
+# stand down while a foreign server holds the port, load-gate against the node - is theirs, and
+# each of those rules is there because something took k3s down without it.
 # The dev server, supervised: the container's process is this loop, not the server.
 #
 # A fix run does things that kill a dev server - switches branch, regenerates a lockfile, runs a

@@ -165,13 +165,26 @@ const branchUrl = computed(() => (branch.value ? `https://github.com/${ props.fo
           <span>Create pull request</span>
         </RcButton>
 
-        <!-- The recording: published, staged, or still to make. -->
+        <!--
+          The recording, in three states. A STAGED one is a file inside the workspace, not a
+          URL - so it is shown as a fact, never as a link, because a `/workspaces/...` path in an
+          href is a link that goes nowhere. It used to fall through to offering Record again,
+          which hid a recording that had just taken ninety seconds to make.
+        -->
         <a v-if="published" class="steps__link" :href="video || '#'" target="_blank" rel="noopener">
           <RcStatusBadge status="success">Recording</RcStatusBadge>
         </a>
-        <RcButton v-else-if="video && pr" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'publish')">
-          <span>Add recording to pull request</span>
-        </RcButton>
+        <template v-else-if="video">
+          <RcStatusBadge status="success" :title="`recorded in the workspace at ${ video }`">
+            Recording ready
+          </RcStatusBadge>
+          <RcButton v-if="pr" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'publish')">
+            <span>Add it to the pull request</span>
+          </RcButton>
+          <RcButton variant="link" size="small" :disabled="busy" @click="emit('act', 'record')">
+            <span>Re-record</span>
+          </RcButton>
+        </template>
         <RcButton v-else-if="branch || pr" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'record')">
           <span>Record</span>
         </RcButton>

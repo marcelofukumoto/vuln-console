@@ -1,4 +1,6 @@
 #!/bin/sh
+# Adapted from the Dev extension's `WORKSPACE_SCRIPT`: the init-and-fetch instead of clone, the
+# hard-linked node_modules template keyed by lockfile hash, and the shared caches are theirs.
 # The workspace's checkout and install, as the node user. Split from boot.sh so the privileged
 # half is short enough to read and this half can be run again by hand.
 set -e

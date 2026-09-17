@@ -1,4 +1,7 @@
 #!/bin/sh
+# Adapted from the Dev extension's `WORKSPACE_SCRIPT` (pkg/dev-extension/apps.ts), split into a
+# privileged half and an unprivileged one and written as real files rather than a joined array.
+# The apt-IPv4 line, the shared-cache layout and the subPath ownership fix are all theirs.
 # Bring one fix workspace up: a rancher/dashboard checkout with its dependencies installed and
 # the dev server supervised on top of it.
 #
