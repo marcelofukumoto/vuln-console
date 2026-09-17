@@ -1,0 +1,21 @@
+{
+  "name": "vuln-console",
+  "description": "The Dependabot vulnerability board for rancher/dashboard: see what is actionable, and fix it in-cluster with an agent",
+  "version": "0.16.6",
+  "private": false,
+  "homepage": "https://github.com/marcelofukumoto/vuln-console",
+  "rancher": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@vue/cli-plugin-babel": "5.0.9",
+    "@vue/cli-service": "5.0.8",
+    "@vue/cli-plugin-typescript": "5.0.9"
+  },
+  "icon": "https://marcelofukumoto.github.io/vuln-console/icon.svg",
+  "files": [
+    "**/*"
+  ],
+  "main": "vuln-console-0.16.6.umd.min.js"
+}
