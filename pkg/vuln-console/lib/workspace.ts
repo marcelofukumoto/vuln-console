@@ -191,10 +191,29 @@ export async function ensureWorkspace(
   // only way to get it was to delete the installation by hand.
   await ensureWorkspaceApp(store);
 
+  const values = {
+    repo:        board.repo,
+    fork,
+    // Lower case for the service-proxy path, upper for the probe: Kubernetes wants
+    // `scheme: HTTPS` and the proxy wants `https:`, and the same value cannot be both.
+    scheme:      devSchemeFor(board),
+    probeScheme: devSchemeFor(board).toUpperCase(),
+  };
+
   const existing = await store.dispatch('management/find', { type: APP_INSTANCE_TYPE, id: name })
     .catch(() => null);
 
   if (existing) {
+    // Bring its values up to date rather than assuming they are. An installation keeps whatever
+    // it was created with, so one made by an older version of this extension carries that
+    // version's idea of the repository, the fork and the dev server's scheme - and there is no
+    // other moment when those get corrected. This one had `{repo}` and nothing else, so it was
+    // still probing for HTTPS against a server answering http and had no fork at all.
+    if (JSON.stringify(existing.spec?.values || {}) !== JSON.stringify(values)) {
+      existing.spec = { ...existing.spec, values };
+      await existing.save();
+    }
+
     return name;
   }
 
@@ -211,14 +230,7 @@ export async function ensureWorkspace(
       app:              WORKSPACE_APP,
       namespace:        name,
       targets:          [{ clusterName: 'local' }],
-      values:           {
-        repo:        board.repo,
-        fork,
-        // Lower case for the service-proxy path, upper for the probe: Kubernetes wants
-        // `scheme: HTTPS` and the proxy wants `https:`, and the same value cannot be both.
-        scheme:      devSchemeFor(board),
-        probeScheme: devSchemeFor(board).toUpperCase(),
-      },
+      values,
       provisionCluster: { enabled: false },
     },
   });

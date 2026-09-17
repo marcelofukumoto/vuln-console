@@ -1,7 +1,7 @@
 {
   "name": "vuln-console",
   "description": "The Dependabot vulnerability board for rancher/dashboard: see what is actionable, and fix it in-cluster with an agent",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "private": false,
   "homepage": "https://github.com/marcelofukumoto/vuln-console",
   "rancher": {
