@@ -24,6 +24,36 @@ node $WSD/bin/browser.mjs record-script <script.mjs> $WSD/artifacts/<slug>.webm
    `async ({ page, click, type, waitFor, settle, say }) => { … }` and draws the URL bar, the
    cursor, click ripples and keystroke badges into the clip — so it shows what was done.
 
+### Three things that decide whether you get a page or a spinner
+
+These are not preferences. Each one is the difference between a screenshot of the dashboard and
+a screenshot of a loading circle.
+
+1. **Open it through the Rancher proxy, not `localhost:8005`.** Rancher's session is a cookie,
+   and a cookie belongs to an origin. On Rancher's own origin the session applies; on localhost
+   it does not, and the dashboard boots into a spinner it never leaves. The URL is:
+
+   ```
+   $RANCHER_URL/k8s/clusters/local/api/v1/namespaces/<workspace>/services/http:<workspace>:8005/proxy/
+   ```
+
+   (`<workspace>` is the namespace your commands run in; `http` is this repository's dev-server
+   scheme — some serve TLS and take `https` there instead.)
+
+2. **Wait for real content, never for a timer or for network idle.** The dashboard holds sockets
+   open, so `networkidle` never settles, and a fixed wait fires while it is still booting:
+
+   ```js
+   await page.waitForSelector('header, .dashboard-root, nav', { timeout: 90000 });
+   ```
+
+3. **Put any script you write under `$WSD`.** `playwright-core` is installed at
+   `$WSD/node_modules`, and an ESM `import` ignores NODE_PATH — it resolves by walking up from
+   the SCRIPT's own directory. A script in `/tmp` cannot find it and dies with
+   ERR_MODULE_NOT_FOUND; one in `$WSD/artifacts/` resolves. That is also why `browser.mjs` works
+   from `$WSD/bin`.
+
+
 5. Convert it, because Safari cannot play webm:
 
 ```
