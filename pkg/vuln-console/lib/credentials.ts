@@ -237,17 +237,37 @@ function encodeSecret(value: string): string {
  * A merge patch naming one key, so nobody else's is read, rewritten or lost. `''` clears it,
  * which is the only way to remove one.
  */
-export async function saveCredentials(principalId: string, ghToken: string): Promise<void> {
-  await ensureSecret();
+export interface CredentialChanges {
+  /** Absent leaves it alone; `''` clears it, which is the only way to remove one. */
+  ghToken?: string;
+}
 
-  const clearing = ghToken === '';
+/**
+ * Write the fields this change actually carries, and nothing else.
+ *
+ * Absent is not the same as empty. It used to take the token as a plain string, so a dialog
+ * saved with the field left blank - which is what saving it after only reading it looks like -
+ * sent the empty string, and the empty string means delete. Pressing Save threw the token away.
+ * There is a Clear button for that, and it is the only thing that should be able to do it.
+ *
+ * Same shape as the report console's, which never had the bug, so the two dialogs behave the
+ * same way for the same reason.
+ */
+export async function saveCredentials(principalId: string, changes: CredentialChanges): Promise<void> {
+  if (changes.ghToken === undefined) {
+    return;
+  }
+
+  const clearing = changes.ghToken === '';
+
+  await ensureSecret();
 
   await rancherFetch(secretPath(), {
     method:  'PATCH',
     headers: { 'Content-Type': 'application/merge-patch+json', ...METADATA_ONLY },
     body:    JSON.stringify({
       metadata: { annotations: { [annotationKey(principalId)]: clearing ? null : 'set' } },
-      data:     { [tokenKey(principalId)]: clearing ? null : encodeSecret(ghToken) },
+      data:     { [tokenKey(principalId)]: clearing ? null : encodeSecret(changes.ghToken) },
     }),
   });
 }

@@ -88,7 +88,11 @@ async function save() {
   error.value = '';
 
   try {
-    await saveCredentials(props.principalId, github.value.trim());
+    // Only what was typed. A blank field means "I did not change this", so there is nothing
+    // to write and the dialog just closes - it does not mean "remove what is stored".
+    await saveCredentials(props.principalId, {
+      ...(github.value.trim() ? { ghToken: github.value.trim() } : {}),
+    });
     github.value = '';
     emit('saved');
   } catch (e: any) {
@@ -103,7 +107,7 @@ async function clear() {
   error.value = '';
 
   try {
-    await saveCredentials(props.principalId, '');
+    await saveCredentials(props.principalId, { ghToken: '' });
     emit('saved');
   } catch (e: any) {
     error.value = e?.message || String(e);
