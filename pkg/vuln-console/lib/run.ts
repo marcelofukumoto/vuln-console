@@ -26,10 +26,10 @@ import type { PodRef } from './exec';
 import { readJobs, writeJob } from './store';
 import { mintRancherToken, rancherTokenKey, tokenKey } from './credentials';
 import { ghBrowserCdp, ghBrowserStatus } from './gh-browser';
-import { ensureWorkspace, workspaceName } from './workspace';
+import { ensureWorkspace, workspaceName, workspaceUrl } from './workspace';
 import type { Store } from './workspace';
 import { SEED_FILES } from '../seed.generated';
-import { STALE_RUN_MS, WORKSPACES_ROOT, forkFor, prTargetFor } from '../config/constants';
+import { STALE_RUN_MS, WORKSPACE_PORT, WORKSPACES_ROOT, devSchemeFor, forkFor, prTargetFor } from '../config/constants';
 import type { Board } from '../config/constants';
 import type { Job, JobAction, VulnGroup } from '../types';
 
@@ -108,8 +108,14 @@ function shellWrapper(workspace: string): string {
     '# about the pane, not about the work: what claude is doing, and the login it refreshed. Sent',
     '# down the tunnel they look for files that exist here and not in the workspace, and the run',
     '# reports "UserPromptSubmit hook error" on every turn while the drawer learns nothing.',
+    '',
+    "# job.sh stays here too, and for the same reason. It is how a run records what it did, and",
+    '# it writes a ConfigMap with this pod\'s ServiceAccount - it belongs to the run, not to the',
+    '# checkout. Sent down the tunnel it is a script that does not exist in the workspace calling',
+    '# a kubectl that is not installed there, so every run ended unable to report its own result',
+    '# and the board only ever showed what something else had written on its behalf.',
     'case "$1" in',
-    '  *"/seed/chat-hook.mjs"*|*"/seed/claude-credentials.mjs"*) exec /bin/sh -c "$1" ;;',
+    `  *"/seed/chat-hook.mjs"*|*"/seed/claude-credentials.mjs"*|*${ JSON.stringify(`${ ROOT }/job.sh`) }*) exec /bin/sh -c "$1" ;;`,
     'esac',
     '',
 
@@ -270,7 +276,12 @@ export async function startAction(options: StartOptions): Promise<Job> {
     // What an earlier run already achieved is carried forward: Create PR needs the branch the
     // fix made, and Address comments needs the pull request.
     branch:     previous?.branch || null,
-    previewUrl: previous?.previewUrl || null,
+    // Computed, not inherited. It is a formula - the namespace, the port and the scheme this
+    // board's dev server speaks - so there is no reason for the board to wait for a run to
+    // report it, and a first run used to carry null here and had nothing to link to. job.sh
+    // also turns a recorded artefact path into a URL underneath it, which needs it present
+    // from the start rather than after the first fix.
+    previewUrl: `${ window.location.origin }${ workspaceUrl(workspaceName(board.id, library), WORKSPACE_PORT, devSchemeFor(board)) }`,
     prUrl:      previous?.prUrl || null,
     prNumber:   previous?.prNumber || null,
     videoUrl:   previous?.videoUrl || null,

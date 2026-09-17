@@ -75,7 +75,26 @@ base.devServer = {
 
   // The prefix is stripped before a request lands here, so everything is served from the root.
   devMiddleware: { publicPath: '/' },
-  static:        { publicPath: '/' },
+
+  // Two static roots. The first is the checkout's own `public/`, as before.
+  //
+  // The second is where a verification recording is WATCHED. A run writes its mp4 and its notes
+  // into the workspace's `artifacts/`, and that directory is inside a pod - a path nobody can
+  // open. Serving it here makes it a link, because this server is already reachable through the
+  // Rancher proxy with the session of whoever is looking: no second server, no ingress, no
+  // certificate and no credential. Served rather than copied into `public/`, so there is one
+  // copy of a two-megabyte file and nothing that can end up in a fix's diff.
+  //
+  // `watch: false` deliberately: this is where recordings land, and a dev server that watches
+  // it rebuilds the dashboard every time a run writes a frame.
+  static: [
+    { publicPath: '/' },
+    {
+      directory:  require('path').join(process.env.WS || require('path').join(process.cwd(), '..'), 'artifacts'),
+      publicPath: '/vc-artifacts',
+      watch:      false,
+    },
+  ],
 
   // A deep link into the dashboard has to load the app rather than 404. disableDotRule matters
   // in Rancher, where a route routinely carries a resource name with dots in it.

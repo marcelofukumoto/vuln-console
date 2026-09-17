@@ -30,23 +30,21 @@ Deliver **mp4**: Safari cannot play webm, and mp4 is smaller.
 
 ## Make it watchable
 
-Record into `$WSD/artifacts/`, then copy the finished mp4 and the notes into
-`$WSD/src/public/vc-artifacts/`. The dev server serves `public/` at its root and the dev server
-is already reachable through the Rancher proxy with the viewer's own session — so that copy is a
-link anybody can open, with no second server and no credential. It is excluded from git, so it
-cannot reach a diff.
-
-Record the URL, not the path. `$VULN_PREVIEW_URL` is this workspace's own address:
+Record into `$WSD/artifacts/` and report that path:
 
 ```
-cp $WSD/artifacts/<slug>.mp4 $WSD/artifacts/<slug>.md $WSD/src/public/vc-artifacts/
 $ROOT/job.sh <board> "<library>" \
-  videoUrl=$VULN_PREVIEW_URL/vc-artifacts/<slug>.mp4 \
-  infoUrl=$VULN_PREVIEW_URL/vc-artifacts/<slug>.md
+  videoUrl=$WSD/artifacts/<slug>.mp4 \
+  infoUrl=$WSD/artifacts/<slug>.md
 ```
 
-A path like `/workspaces/…` is no use to anybody reading the board — it is not a link, and
-nobody can open it. A URL is.
+`job.sh` records a URL instead of the path. The dev server publishes this workspace's
+`artifacts/` directory at `/vc-artifacts` and is already reachable through the Rancher proxy
+with the session of whoever is looking, so the file you wrote is a link anybody can open, with
+no second server and no credential. Nothing is copied and nothing can reach a fix's diff.
+
+So there is nothing to remember here, and nothing to get wrong: report the path you wrote, and
+the board gets a link. Passing a URL that is already `https://` is fine too - it is left alone.
 
 `record` and `record-script` draw the URL bar, the cursor, click ripples and keystroke badges
 into the video, so the clip SHOWS what was done. `record-script` takes a module whose default

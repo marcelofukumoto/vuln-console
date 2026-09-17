@@ -66,6 +66,34 @@ UPDATED=$(CURRENT="$CURRENT" LIBRARY="$LIBRARY" BOARD="$BOARD" node -e '
     }
   }
 
+  // A recording that only exists as a path inside a pod cannot be watched, and the board has
+  // nothing to link to - which is exactly how a finished recording read as "Recorded, not
+  // served". The workspace dev server publishes its own `artifacts/` directory at
+  // `/vc-artifacts` and is already reachable through the Rancher proxy with the session of
+  // whoever is looking, so the same file is a link with nothing copied and nothing to clean up.
+  //
+  // Done HERE rather than asked for in the prompt. The prompt has said to record a URL since
+  // the recording flow existed and a run still reported a bare path; an instruction an agent
+  // can skip is not a mechanism. A value that is already a URL is left exactly as it is.
+  //
+  // String work only, no filesystem: this script runs in the agent pod, which does not mount
+  // the workspace that holds the file.
+  const base = (job.previewUrl || process.env.VULN_PREVIEW_URL || "").replace(/\/+$/, "");
+
+  for (const key of ["videoUrl", "infoUrl"]) {
+    const value = job[key];
+
+    if (typeof value !== "string" || !base) {
+      continue;
+    }
+
+    const artifact = /^\/workspaces\/[^/]+\/artifacts\/(.+)$/.exec(value);
+
+    if (artifact) {
+      job[key] = `${ base }/vc-artifacts/${ artifact[1] }`;
+    }
+  }
+
   // A phase the board does not know is worse than no phase at all: "is this running" is
   // `phase === "Running"`, so an invented value makes a live run look finished and the board
   // offers its buttons again while an agent is still working. Progress belongs in `stage`,
