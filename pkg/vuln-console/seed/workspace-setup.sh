@@ -188,7 +188,7 @@ fi
 # The browser tool comes in from the ConfigMap the pod already mounts - it is 1488 lines, which
 # is not something to put on a command line. Same read-only-mode trap as the vue config: the
 # mount is 0555, so `cp` produces a file the next run cannot overwrite.
-for tool in browser.mjs rancher-login.mjs wait-for-sidecars; do
+for tool in browser.mjs rancher-login.mjs wait-for-sidecars gh-attach.mjs; do
   rm -f "$WS/bin/$tool"
   cp "/workspace-config/$tool" "$WS/bin/$tool"
   chmod 755 "$WS/bin/$tool"

@@ -25,3 +25,5 @@ data:
     @@include:seed/workspace/wait-for-sidecars@@
   commit-msg: |
     @@include:seed/workspace/commit-msg@@
+  gh-attach.mjs: |
+    @@include:seed/workspace/gh-attach.mjs@@
