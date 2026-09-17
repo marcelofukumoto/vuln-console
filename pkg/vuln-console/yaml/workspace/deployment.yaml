@@ -30,6 +30,17 @@ spec:
           image: ${image}
           command: ["/bin/sh", "/workspace-config/boot.sh"]
           env:
+            # FIRST, because Kubernetes only expands `$(VAR)` for variables declared EARLIER in
+            # this list. Declared after `API`, the `https://$(NODE_IP)` below stays literal and
+            # the dev server proxies the API to a host called `$(NODE_IP)` - which is how it came
+            # up logging `API: 'https://$(NODE_IP)'` and answering nothing.
+            #
+            # This cluster is k3s inside the Rancher container, so the node's own address is how
+            # the dev server reaches the Rancher it belongs to.
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             # The path this dev server is reached at. The dashboard bakes its router base in at
             # build time, so it has to know the prefix the proxy strips on the way in.
             - name: DEV_PROXY_PATH
@@ -40,12 +51,6 @@ spec:
               value: ${rancherUrl}
             - name: VULN_BROWSER_CDP
               value: http://localhost:9222
-            # This cluster is k3s inside the Rancher container, so the node's own address is
-            # how the dev server reaches the Rancher it belongs to.
-            - name: NODE_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
             # A dashboard build is a large one; the default heap is not enough for it.
             - name: NODE_OPTIONS
               value: --max_old_space_size=4096
