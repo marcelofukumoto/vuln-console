@@ -156,6 +156,12 @@ async function fetchAlerts() {
 
     return {
       ...alert,
+      // Which versions the advisory actually covers. Without it the walk can only match by
+      // library NAME, and a name is not a vulnerability: rancher-ai-ui carries four copies of
+      // js-yaml and only one of them - 4.3.0, pulled by @rancher/shell alone - is in range.
+      // Matching by name put the row in the "fixable here" group because jest pulls a js-yaml
+      // too, and jest's is 3.15.2, which no advisory here covers.
+      range:     a.security_vulnerability?.vulnerable_version_range || '',
       ecosystem: a.security_vulnerability?.package?.ecosystem || 'npm',
       cve:       a.security_advisory?.cve_id || null,
       summary:   a.security_advisory?.summary || '',
@@ -418,6 +424,53 @@ async function repoFile(path, repo = REPO) {
 }
 
 /**
+ * Is this version inside one of GitHub's vulnerable ranges?
+ *
+ * They are spelled as comma-separated comparators - `>= 4.0.0, < 4.3.2`, `< 1.2.3`, `= 2.0.0` -
+ * so each part is an operator and a version and all of them must hold. Numeric compare only;
+ * a prerelease suffix is ignored, which errs towards calling something vulnerable and is the
+ * safe direction for a security board.
+ */
+function inRange(version, range) {
+  if (!version || !range) {
+    return false;
+  }
+
+  return range.split(',').every((part) => {
+    const m = part.trim().match(/^(>=|<=|>|<|=)?\s*(.+)$/);
+
+    if (!m) {
+      return false;
+    }
+
+    const cmp = compareVersions(version, m[2].trim());
+
+    switch (m[1] || '=') {
+    case '>=': return cmp >= 0;
+    case '<=': return cmp <= 0;
+    case '>': return cmp > 0;
+    case '<': return cmp < 0;
+    default: return cmp === 0;
+    }
+  });
+}
+
+/** -1, 0 or 1, on the numeric parts alone. */
+function compareVersions(a, b) {
+  const pa = (String(a).match(/\d+/g) || ['0']).slice(0, 3).map(Number);
+  const pb = (String(b).match(/\d+/g) || ['0']).slice(0, 3).map(Number);
+
+  while (pa.length < 3) { pa.push(0); }
+  while (pb.length < 3) { pb.push(0); }
+
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) { return pa[i] < pb[i] ? -1 : 1; }
+  }
+
+  return 0;
+}
+
+/**
  * Compare two versions by their numeric parts. Enough for "is this at least the patch".
  */
 function atLeast(have, need) {
@@ -492,7 +545,23 @@ async function rancherAttribution(vulnerable, alerts) {
   const direct = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
   const entries = parseLock(lock);
 
-  // Which direct dependencies reach each vulnerable library.
+  // The ranges each library is actually vulnerable in, from its open alerts.
+  const ranges = {};
+
+  for (const alert of alerts) {
+    if (alert.state === 'open' && alert.range) {
+      (ranges[alert.library] = ranges[alert.library] || []).push(alert.range);
+    }
+  }
+
+  // Which direct dependencies reach a VULNERABLE COPY of each library.
+  //
+  // The copy, not the name. A tree carries the same library several times at several versions
+  // and an advisory covers some of them: rancher-ai-ui has four js-yamls and the only one in
+  // range is 4.3.0, which `@rancher/shell` alone pulls. Matching by name said jest reached it
+  // too - jest's is 3.15.2 - and the row was offered a local fix for a vulnerability that was
+  // never on that path. The pull request that did fix it pinned `@rancher/shell/js-yaml`,
+  // which is the board saying one thing and the work doing another.
   const sources = {};
 
   for (const [name, range] of Object.entries(direct)) {
@@ -504,8 +573,14 @@ async function rancherAttribution(vulnerable, alerts) {
 
     for (const spec of reachable(entries, [root])) {
       const lib = nameOf(spec);
+      const version = entries.get(spec)?.version;
+      const covers = ranges[lib];
 
-      if (vulnerable.has(lib)) {
+      // No range recorded (a closed alert, or an advisory without one) falls back to the name,
+      // which is what this did before: better a coarse answer than none.
+      const hit = covers ? covers.some((r) => inRange(version, r)) : vulnerable.has(lib);
+
+      if (hit) {
         (sources[lib] = sources[lib] || []).push(name);
       }
     }
