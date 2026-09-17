@@ -29,10 +29,12 @@
 //
 // The token is read by the pod that needs it, with its own ServiceAccount, at the moment it is
 // needed. It is never sent from here into a pod.
-import { K8S_BASE, rancherFetch } from './rancher';
-import { GH_TOKEN_KEY, NAMESPACE, SECRET_NAME } from '../config/constants';
+import { K8S_BASE, STEVE_BASE, rancherFetch } from './rancher';
+import {
+  GH_TOKEN_KEY, NAMESPACE, RANCHER_TOKEN_KEY, RANCHER_TOKEN_TTL_MS, SECRET_NAME,
+} from '../config/constants';
 
-export { GH_TOKEN_KEY, NAMESPACE, SECRET_NAME };
+export { GH_TOKEN_KEY, NAMESPACE, RANCHER_TOKEN_KEY, SECRET_NAME };
 
 /**
  * A Rancher principal as a Secret key.
@@ -50,9 +52,51 @@ export function userSlug(principalId: string): string {
     .slice(0, 200) || 'unknown';
 }
 
-/** The Secret key holding one user's token. */
+/** The Secret key holding one user's GitHub token. */
 export function tokenKey(principalId: string): string {
   return `${ GH_TOKEN_KEY }-${ userSlug(principalId) }`;
+}
+
+/** The Secret key holding one user's Rancher token. */
+export function rancherTokenKey(principalId: string): string {
+  return `${ RANCHER_TOKEN_KEY }-${ userSlug(principalId) }`;
+}
+
+/**
+ * Mint a Rancher token for this user and store it beside their GitHub one.
+ *
+ * Minted from the browser, same-origin, so it is created BY the person looking at the board with
+ * the session they already have - this asks Rancher for a token on their behalf rather than
+ * needing any credential of its own. What the verification screenshots then show is what that
+ * person can see, which is the only honest answer to "does the fix work".
+ *
+ * Fresh on every run rather than reused: a stored token can be revoked, expire, or belong to a
+ * different Rancher than the one this tab is open on, and each of those is a browser that
+ * silently photographs a login page. Minting costs one request and the TTL clears them up.
+ */
+export async function mintRancherToken(principalId: string, description: string): Promise<void> {
+  const minted = await rancherFetch(`${ STEVE_BASE.replace('/v1', '') }/v3/tokens`, {
+    method: 'POST',
+    body:   JSON.stringify({
+      type: 'token',
+      description,
+      ttl:  RANCHER_TOKEN_TTL_MS,
+    }),
+  }).catch(() => null);
+
+  const token = minted?.token;
+
+  if (!token) {
+    throw new Error('Rancher would not issue a token for this session, so the browser cannot be signed in to verify a fix.');
+  }
+
+  await ensureSecret();
+
+  await rancherFetch(secretPath(), {
+    method:  'PATCH',
+    headers: { 'Content-Type': 'application/merge-patch+json', ...METADATA_ONLY },
+    body:    JSON.stringify({ data: { [rancherTokenKey(principalId)]: encodeSecret(token) } }),
+  });
 }
 
 function annotationKey(principalId: string): string {

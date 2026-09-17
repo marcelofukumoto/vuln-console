@@ -108,6 +108,19 @@ export function prTargetFor(board: Board): string {
 export const SECRET_NAME = 'settings';
 export const GH_TOKEN_KEY = 'gh_token';
 
+/**
+ * The Rancher token key, also per user.
+ *
+ * A fix is verified by driving a browser at the dev server, and that server proxies Rancher's
+ * API to the real cluster - so without a session the browser photographs a login page. Rancher's
+ * session IS a cookie carrying a token, so the token is the login. Minted as the person looking
+ * at the board, so what the screenshots show is what THEY can see.
+ */
+export const RANCHER_TOKEN_KEY = 'rancher_token';
+
+/** How long a minted Rancher token lives. Long enough for any fix, short enough to expire. */
+export const RANCHER_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 /** ConfigMap names and the labels that mark what this extension owns, and for which board. */
 export const OWNER_LABEL = 'vuln-console.rancher.io/owns';
 export const BOARD_LABEL = 'vuln-console.rancher.io/board';

@@ -19,6 +19,13 @@ FORK=${3:?workspace-setup.sh needs the fork}
 # The Secret key holding the token of the person who pressed the button. The branch is pushed
 # with THEIR credential, to THEIR fork, so the work is attributable to them.
 TOKEN_KEY=${4:?workspace-setup.sh needs the token key}
+# The Rancher token key for the same person. Optional: without it the workspace still builds and
+# pushes, it just cannot sign the browser in, so verification photographs a login page.
+RANCHER_TOKEN_KEY=${7:-}
+# The Rancher the token was minted against, which is the one the person is looking at. Passed in
+# rather than read from the pod: the workspace Deployment points at `$(NODE_IP)`, and a token
+# minted on a different origin answers 401 there for ever.
+RANCHER_URL=${8:-}
 # So each step can name itself on the job, and the board can say what it is waiting for rather
 # than showing "Running" through five minutes of clone and install.
 BOARD=${5:-}
@@ -70,6 +77,8 @@ secret_key() {
 }
 
 GH_TOKEN=$(secret_key "$SECRET_NS" "$SECRET" "$TOKEN_KEY")
+RANCHER_TOKEN=''
+[ -n "$RANCHER_TOKEN_KEY" ] && RANCHER_TOKEN=$(secret_key "$SECRET_NS" "$SECRET" "$RANCHER_TOKEN_KEY")
 
 if [ -z "$GH_TOKEN" ]; then
   echo "workspace-setup.sh: no GitHub token is stored for this user, so nothing could be pushed" >&2
@@ -166,9 +175,11 @@ fi
 # The browser tool comes in from the ConfigMap the pod already mounts - it is 1488 lines, which
 # is not something to put on a command line. Same read-only-mode trap as the vue config: the
 # mount is 0555, so `cp` produces a file the next run cannot overwrite.
-rm -f "$WS/bin/browser.mjs"
-cp /workspace-config/browser.mjs "$WS/bin/browser.mjs"
-chmod 755 "$WS/bin/browser.mjs"
+for tool in browser.mjs rancher-login.mjs; do
+  rm -f "$WS/bin/$tool"
+  cp "/workspace-config/$tool" "$WS/bin/$tool"
+  chmod 755 "$WS/bin/$tool"
+done
 
 # The browser tool's one dependency.
 #
@@ -187,8 +198,9 @@ fi
 #
 # CLAUDE_BROWSER_CDP is the name browser.mjs reads. The Deployment also sets VULN_BROWSER_CDP,
 # and both point at the sidecar sharing this pod's localhost.
-printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nNODE_PATH=%s\n' \
-  "$TOKEN" "$TOKEN" "$FORK" "$REPO" "${VULN_BROWSER_CDP:-http://localhost:9222}" "$WS/node_modules" > "$WS/.env"
+printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nNODE_PATH=%s\nRANCHER_TOKEN=%s\nRANCHER_URL=%s\nAPI=%s\n' \
+  "$TOKEN" "$TOKEN" "$FORK" "$REPO" "${VULN_BROWSER_CDP:-http://localhost:9222}" "$WS/node_modules" \
+  "$RANCHER_TOKEN" "$RANCHER_URL" "$RANCHER_URL" > "$WS/.env"
 chmod 600 "$WS/.env"
 
 # Prove the browser works too, for the same reason: a recording that cannot be made is worth
@@ -205,7 +217,7 @@ git ls-remote --heads fork >/dev/null 2>&1 || {
   exit 4
 }
 
-echo "workspace-setup: credential verified, gh $("$WS/bin/gh" --version | head -1 | awk '{print $3}'), fork $FORK, browser $BROWSER_OK"
+echo "workspace-setup: credential verified, gh $("$WS/bin/gh" --version | head -1 | awk '{print $3}'), fork $FORK, browser $BROWSER_OK, rancher $([ -n "$RANCHER_TOKEN" ] && echo signed-in || echo "no token")"
 INNER_EOF
 
 # The script travels on argv (it is not a secret); the token travels on stdin (it is).
@@ -221,6 +233,7 @@ stage preparing
 printf '%s' "$GH_TOKEN" | kube exec -i -n "$NS" "deploy/$NS" -c workspace -- \
   setpriv --reuid=1000 --regid=1000 --init-groups \
   /usr/bin/env HOME="$WS/.home" WS="$WS" FORK="$FORK" REPO="$REPO" \
+  RANCHER_TOKEN="$RANCHER_TOKEN" RANCHER_URL="${RANCHER_URL:-}" \
   /bin/sh "$WS/.vc-setup.sh"
 
 kube exec -n "$NS" "deploy/$NS" -c workspace -- rm -f "$WS/.vc-setup.sh" >/dev/null 2>&1 || true

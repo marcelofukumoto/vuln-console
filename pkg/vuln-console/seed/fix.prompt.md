@@ -115,9 +115,18 @@ The point is not that it builds — it is that the place this library is actuall
 behaves. Grep the checkout for where it is imported, pick two to four real interactions that
 exercise it, and drive them in the browser against the running dev server.
 
-**The browser is already here and there is one command for it.** Do not install a browser, do not
+**Sign the browser in first.** The dev server proxies Rancher's API to the real cluster, so a
+browser with no session shows a login page — and a screenshot of a login page looks like evidence
+and is not. Rancher's session is a cookie carrying a token, and one has been minted for you:
+
+```
+node $WSD/bin/rancher-login.mjs            # sets it for Rancher and for localhost:8005
+node $WSD/bin/rancher-login.mjs --check    # says who the token is, if you want to be sure
+```
+
+**Then the browser, and there is one command for it.** Do not install a browser, do not
 `npm i playwright`, do not hand-roll a `recordVideo` script — a Chromium sidecar is running in
-this pod and `$WS/bin/browser.mjs` drives it over CDP:
+this pod and `$WSD/bin/browser.mjs` drives it over CDP:
 
 ```
 node $WSD/bin/browser.mjs screenshot <url> <out.png>
@@ -149,7 +158,11 @@ Check first:
 ```
 node $WSD/bin/browser.mjs eval "() => location.href"   # does the browser answer at all
 curl -sk -o /dev/null -w '%{http_code}' https://localhost:8005/   # is the dev server up
+node $WSD/bin/rancher-login.mjs --check                # is there a session to browse with
 ```
+
+If a page comes back as the login screen, the session did not take — say so rather than
+screenshotting it.
 
 Write the verification up as numbered checks, each ending ✅ or ❌, followed by a one-line
 verdict. Then record it:

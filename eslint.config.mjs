@@ -11,10 +11,12 @@ export default [
       'dist-pkg/**',
       '.shell/**',
       'pkg/*/*.generated.ts',
-      // Carried verbatim from the Dev extension's agent seed. Editing somebody else's working
-      // tool to satisfy this config would risk breaking it and make re-syncing it harder, and
-      // it is not this repository's code to style.
+      // Carried from the Dev extension's agent seed. Editing somebody else's working tool to
+      // satisfy this config would risk breaking it and make re-syncing it harder, and it is not
+      // this repository's code to style. Both are command-line tools, so `console.log` IS their
+      // output rather than a stray debug line.
       'pkg/*/seed/workspace/browser.mjs',
+      'pkg/*/seed/workspace/rancher-login.mjs',
     ],
   },
   js.configs.recommended,

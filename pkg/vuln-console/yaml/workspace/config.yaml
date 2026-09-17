@@ -19,3 +19,5 @@ data:
     @@include:seed/workspace/vue.config.js@@
   browser.mjs: |
     @@include:seed/workspace/browser.mjs@@
+  rancher-login.mjs: |
+    @@include:seed/workspace/rancher-login.mjs@@

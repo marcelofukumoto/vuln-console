@@ -24,7 +24,7 @@ import { agentProject, agentsApi } from './agents';
 import { podExec, podRunScript, podWriteFile, shellQuote } from './exec';
 import type { PodRef } from './exec';
 import { readJobs, writeJob } from './store';
-import { tokenKey } from './credentials';
+import { mintRancherToken, rancherTokenKey, tokenKey } from './credentials';
 import { ensureWorkspace, workspaceName } from './workspace';
 import type { Store } from './workspace';
 import { SEED_FILES } from '../seed.generated';
@@ -310,6 +310,13 @@ export async function startAction(options: StartOptions): Promise<Job> {
     // than thrown, because the caller has already been answered.
     void (async() => {
       try {
+        // A Rancher token for this person, so the browser in the workspace is signed in AS them.
+        // Without it the verification drives a browser with no session and photographs a login
+        // page, which looks like evidence and is not. Not fatal - a fix that cannot be shown is
+        // still a fix - so a failure here is swallowed and the setup reports which it got.
+        await mintRancherToken(principalId, `vuln-console ${ board.id } ${ library }`)
+          .catch(() => undefined);
+
         await podRunScript(
           target,
           [
@@ -320,6 +327,8 @@ export async function startAction(options: StartOptions): Promise<Job> {
             shellQuote(tokenKey(principalId)),
             shellQuote(board.id),
             shellQuote(library),
+            shellQuote(rancherTokenKey(principalId)),
+            shellQuote(window.location.origin),
           ].join(' '),
           `prepare the workspace for ${ board.repo }`,
           WORKSPACE_READY_MS,

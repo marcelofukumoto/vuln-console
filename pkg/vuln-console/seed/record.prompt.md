@@ -6,7 +6,14 @@ The fix exists but its recording does not, or needs redoing. Produce it, and cha
    server — the pod's memory fits one.
 2. Grep the checkout for where the library is used and pick two to four real interactions that
    exercise it.
-3. Drive them with the browser that is already in this pod. Do not install one, and do not
+3. Sign the browser in — the dev server proxies Rancher's API, so without a session every page
+   is the login screen:
+
+```
+node $WSD/bin/rancher-login.mjs
+```
+
+4. Drive them with the browser that is already in this pod. Do not install one, and do not
    hand-roll a `recordVideo` script:
 
 ```
@@ -17,14 +24,14 @@ node $WSD/bin/browser.mjs record-script <script.mjs> $WSD/artifacts/<slug>.webm
    `async ({ page, click, type, waitFor, settle, say }) => { … }` and draws the URL bar, the
    cursor, click ripples and keystroke badges into the clip — so it shows what was done.
 
-4. Convert it, because Safari cannot play webm:
+5. Convert it, because Safari cannot play webm:
 
 ```
 ffmpeg -y -i <slug>.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart -an <slug>.mp4 \
   && rm -f <slug>.webm
 ```
 
-5. Write the checks up as a numbered list, each ending ✅ or ❌, then a one-line verdict, and
+6. Write the checks up as a numbered list, each ending ✅ or ❌, then a one-line verdict, and
    record both:
 
 ```
