@@ -115,19 +115,52 @@ The point is not that it builds — it is that the place this library is actuall
 behaves. Grep the checkout for where it is imported, pick two to four real interactions that
 exercise it, and drive them in the browser against the running dev server.
 
-Use the browser that is already in this pod at `$VULN_BROWSER_CDP` — connect over CDP, do not
-install a browser. Capture an annotated video and take screenshots of each check.
+**The browser is already here and there is one command for it.** Do not install a browser, do not
+`npm i playwright`, do not hand-roll a `recordVideo` script — a Chromium sidecar is running in
+this pod and `$WS/bin/browser.mjs` drives it over CDP:
+
+```
+node $WSD/bin/browser.mjs screenshot <url> <out.png>
+node $WSD/bin/browser.mjs record <url> <out.webm> [durationMs]
+node $WSD/bin/browser.mjs record-script <script.mjs> <out.webm>
+node $WSD/bin/browser.mjs eval "<js>"          # read state back out of the page
+```
+
+`record` and `record-script` draw the URL bar, the cursor, click ripples and keystroke badges
+into the video, so the clip SHOWS what was done rather than just what changed. Use
+`record-script` for anything with steps: it takes a module whose default export is
+`async ({ page, click, type, waitFor, settle, say }) => { … }`, so the actions are scripted and
+annotated rather than narrated afterwards.
+
+Put the artefacts in `$WSD/artifacts/` — that directory is the one the browser container also
+mounts, and it survives the pod.
+
+Deliver **mp4**, not webm: Safari cannot play webm and mp4 is smaller. ffmpeg is installed.
+
+```
+ffmpeg -y -i out.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart -an out.mp4 && rm -f out.webm
+```
+
+**If the dev server is not serving**, say so and record what you can instead — the build output,
+the lockfile diff, the test run. A fix with an honest "could not verify in a browser because the
+dev server does not start for this repository" is worth more than a fix with a video of nothing.
+Check first:
+
+```
+node $WSD/bin/browser.mjs eval "() => location.href"   # does the browser answer at all
+curl -sk -o /dev/null -w '%{http_code}' https://localhost:8005/   # is the dev server up
+```
 
 Write the verification up as numbered checks, each ending ✅ or ❌, followed by a one-line
 verdict. Then record it:
 
 ```
-$ROOT/job.sh "<library>" phase=Fixed previewUrl=<url> videoUrl=<path> infoUrl=<path> \
+$ROOT/job.sh <board> "<library>" phase=Fixed previewUrl=<url> videoUrl=<path> infoUrl=<path> \
   message="<one line: what was bumped, in how many manifests, and what was verified>"
 ```
 
-If a check fails, that is a real result: record `phase=Failed` with what broke. A fix that
-breaks the feature is worse than the advisory.
+If a check fails, that is a real result: record `phase=Failed` with what broke. A fix that breaks
+the feature is worse than the advisory.
 
 ## What you must not do
 
@@ -135,3 +168,4 @@ breaks the feature is worse than the advisory.
 - do not comment on anything on GitHub
 - do not touch any repository other than the checkout in your workspace
 - do not start a second dev server
+- do not install a browser or a copy of playwright — one of each is already here

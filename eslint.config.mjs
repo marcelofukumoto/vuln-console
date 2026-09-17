@@ -5,7 +5,18 @@ import vue from 'eslint-plugin-vue';
 import globals from 'globals';
 
 export default [
-  { ignores: ['node_modules/**', 'dist-pkg/**', '.shell/**', 'pkg/*/*.generated.ts'] },
+  {
+    ignores: [
+      'node_modules/**',
+      'dist-pkg/**',
+      '.shell/**',
+      'pkg/*/*.generated.ts',
+      // Carried verbatim from the Dev extension's agent seed. Editing somebody else's working
+      // tool to satisfy this config would risk breaking it and make re-syncing it harder, and
+      // it is not this repository's code to style.
+      'pkg/*/seed/workspace/browser.mjs',
+    ],
+  },
   js.configs.recommended,
   ...ts.configs.recommended,
   ...vue.configs['flat/recommended'],

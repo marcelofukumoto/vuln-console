@@ -65,7 +65,14 @@ fi
 #
 # A dotfile so it is invisible to the repository's own tooling, and excluded from git so it can
 # never end up in a fix's diff.
+# Removed first, and the mode set after. `cp` preserves the SOURCE's mode, and the source is a
+# ConfigMap mount at 0555 - so the copy lands read-only, and the next boot's `cp` cannot
+# overwrite it. The first start worked and every restart after it crash-looped on
+# "Permission denied", which took 137 restarts to be looked at.
+rm -f "$WS/src/.workspace.vue.config.js"
 cp /workspace-config/vue.config.js "$WS/src/.workspace.vue.config.js"
+chmod 644 "$WS/src/.workspace.vue.config.js"
+
 grep -qxF '.workspace.vue.config.js' "$WS/src/.git/info/exclude" 2>/dev/null \
   || echo '.workspace.vue.config.js' >> "$WS/src/.git/info/exclude"
 

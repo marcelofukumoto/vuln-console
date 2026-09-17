@@ -163,10 +163,40 @@ if ! [ -x "$WS/bin/gh" ]; then
   rm -rf /tmp/gh.tgz "/tmp/gh_${GH_VERSION}_linux_${GH_ARCH}"
 fi
 
+# The browser tool comes in from the ConfigMap the pod already mounts - it is 1488 lines, which
+# is not something to put on a command line. Same read-only-mode trap as the vue config: the
+# mount is 0555, so `cp` produces a file the next run cannot overwrite.
+rm -f "$WS/bin/browser.mjs"
+cp /workspace-config/browser.mjs "$WS/bin/browser.mjs"
+chmod 755 "$WS/bin/browser.mjs"
+
+# The browser tool's one dependency.
+#
+# `playwright-core`, NOT `playwright`: the browser is a sidecar we connect to over CDP, already
+# running, so there is nothing to download. `playwright` would fetch several hundred megabytes of
+# browsers into every workspace to drive one that is already there.
+#
+# Installed OUTSIDE the checkout, at $WS/node_modules, so it can never appear in a fix's diff or
+# confuse the repository's own dependency tree. NODE_PATH is how browser.mjs finds it.
+if ! [ -d "$WS/node_modules/playwright-core" ]; then
+  ( cd "$WS" && npm install --no-save --silent playwright-core@1.56.1 >/dev/null 2>&1 ) || true
+fi
+
 # gh reads GH_TOKEN from the environment; the shell wrapper sources this for every command the
 # agent runs. 0600, because it is a token in a file.
-printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\n' "$TOKEN" "$TOKEN" "$FORK" "$REPO" > "$WS/.env"
+#
+# CLAUDE_BROWSER_CDP is the name browser.mjs reads. The Deployment also sets VULN_BROWSER_CDP,
+# and both point at the sidecar sharing this pod's localhost.
+printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nNODE_PATH=%s\n' \
+  "$TOKEN" "$TOKEN" "$FORK" "$REPO" "${VULN_BROWSER_CDP:-http://localhost:9222}" "$WS/node_modules" > "$WS/.env"
 chmod 600 "$WS/.env"
+
+# Prove the browser works too, for the same reason: a recording that cannot be made is worth
+# knowing about before a fix has been made and verified.
+BROWSER_OK=no
+if [ -f "$WS/bin/browser.mjs" ] && [ -d "$WS/node_modules/playwright-core" ]; then
+  curl -s -m 10 "${VULN_BROWSER_CDP:-http://localhost:9222}/json/version" >/dev/null 2>&1 && BROWSER_OK=yes
+fi
 
 # Prove it rather than assume it. A credential that does not work is worth knowing about now,
 # not three minutes into a fix with the work already done.
@@ -175,7 +205,7 @@ git ls-remote --heads fork >/dev/null 2>&1 || {
   exit 4
 }
 
-echo "workspace-setup: credential verified, gh $("$WS/bin/gh" --version | head -1 | awk '{print $3}'), fork $FORK"
+echo "workspace-setup: credential verified, gh $("$WS/bin/gh" --version | head -1 | awk '{print $3}'), fork $FORK, browser $BROWSER_OK"
 INNER_EOF
 
 # The script travels on argv (it is not a secret); the token travels on stdin (it is).

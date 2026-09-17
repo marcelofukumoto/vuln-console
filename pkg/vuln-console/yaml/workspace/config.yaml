@@ -17,3 +17,5 @@ data:
     @@include:seed/workspace/serve.sh@@
   vue.config.js: |
     @@include:seed/workspace/vue.config.js@@
+  browser.mjs: |
+    @@include:seed/workspace/browser.mjs@@

@@ -24,9 +24,11 @@ chown node:node "$WS" "$WS/.home" 2>/dev/null || true
 [ -f "$WS/.owned" ] || { chown -R node:node "$WS" 2>/dev/null; touch "$WS/.owned"; }
 
 # The browser sidecar mounts these as subPaths, and the kubelet creates a missing subPath as
-# root - leaving the seed unable to write into it.
-mkdir -p "$WS/.a11y/opt" "$WS/.a11y/init"
-chown -R node:node "$WS/.a11y" 2>/dev/null || true
+# ROOT - leaving everything that runs as the node user unable to write into it. `artifacts` is
+# the one that matters: it is where screenshots and recordings go, and a browser tool that cannot
+# write its output fails with EACCES after doing all the work.
+mkdir -p "$WS/.a11y/opt" "$WS/.a11y/init" "$WS/artifacts"
+chown -R node:node "$WS/.a11y" "$WS/artifacts" 2>/dev/null || true
 
 # What every workspace on this node shares rather than keeping its own copy. Measured before
 # this existed: Cypress 813 MB, yarn 749 MB, and a gigabyte of node_modules - most of a
