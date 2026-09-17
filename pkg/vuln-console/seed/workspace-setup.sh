@@ -143,8 +143,21 @@ git config --global credential.helper "store --file=$WS/.git-credentials"
 git config --global user.name "${GIT_NAME:-Vulnerability Console}"
 git config --global user.email "${GIT_EMAIL:-noreply@rancher.com}"
 
-# Never attribute a console fix to the agent. The commits are the human's, on their fork.
-git config --global --unset-all trailer.co-authored-by 2>/dev/null || true
+# Never attribute a console fix to the agent. The commits are the human's, pushed to their fork
+# and offered upstream as them.
+#
+# A commit-msg HOOK rather than a line in the prompt, because a prompt loses: every session is
+# handed an attribution reminder asking for a `Co-Authored-By: Claude` trailer, and it says it
+# replaces earlier guidance. The hook runs after the message is composed and before the commit
+# exists - for `commit`, `-m`, `--amend` and rebase alike - so the outcome does not depend on
+# which instruction the agent believed.
+#
+# core.hooksPath GLOBALLY, so it survives the checkout being re-cloned.
+mkdir -p "$WS/.githooks"
+rm -f "$WS/.githooks/commit-msg"
+cp /workspace-config/commit-msg "$WS/.githooks/commit-msg"
+chmod 755 "$WS/.githooks/commit-msg"
+git config --global core.hooksPath "$WS/.githooks"
 
 # The fork remote, set here rather than at clone time: the fork follows whoever's token this is,
 # which the checkout could not know.
@@ -175,7 +188,7 @@ fi
 # The browser tool comes in from the ConfigMap the pod already mounts - it is 1488 lines, which
 # is not something to put on a command line. Same read-only-mode trap as the vue config: the
 # mount is 0555, so `cp` produces a file the next run cannot overwrite.
-for tool in browser.mjs rancher-login.mjs; do
+for tool in browser.mjs rancher-login.mjs wait-for-sidecars; do
   rm -f "$WS/bin/$tool"
   cp "/workspace-config/$tool" "$WS/bin/$tool"
   chmod 755 "$WS/bin/$tool"

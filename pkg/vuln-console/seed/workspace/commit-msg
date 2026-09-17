@@ -1,0 +1,62 @@
+#!/usr/bin/env node
+// Strip AI attribution out of a commit message, after it has been written.
+//
+// Taken from the Dev extension's agent seed, unchanged, for the same reason it exists there: a
+// fix from this console is the human's work, pushed to their fork and offered upstream as them.
+// A `git config --unset trailer.co-authored-by` does not achieve that - the trailer is written
+// into the message by the agent, not by git - and a line in a prompt loses to the attribution
+// reminder every session is handed. A commit-msg hook is the one place the outcome does not
+// depend on which instruction the agent believed.
+//
+// Commits from these workspaces are codyrancher's own work, and the skills say so - see
+// skills/my-commit-create/SKILL.md, which has forbidden a `Co-Authored-By` line since long
+// before this hook existed. It kept happening anyway: every session is handed an attribution
+// system-reminder asking for `Co-Authored-By: Claude ...` and a `Claude-Session:` URL, and that
+// reminder says it replaces any earlier attribution guidance. Two instructions, the later one
+// louder, and a bullet in a skill loses often enough to reach real commits.
+//
+// So this is the same rule stated where the outcome does not depend on which instruction an
+// agent believed. `commit-msg` runs after the message is composed and before the commit object
+// exists, for `git commit`, `-m`, `--amend` and a rebase alike, so there is one place to put it.
+//
+// What must survive: `Co-authored-by: Cody Jackson <claude@cjackson.dev>` is the user's own
+// identity - their address merely contains "claude" - and GitHub writes it on a squash merge.
+// Nothing here keys on the word "claude" alone; the trailer tests want Claude as the author
+// *name*, or an anthropic.com address.
+const fs = require('node:fs');
+
+const file = process.argv[2];
+
+if (!file) {
+  process.exit(0);
+}
+
+const DROP = [
+  /^\s*co-authored-by:\s*claude\b/i,
+  /^\s*co-authored-by:\s*.*<[^>]*@[a-z0-9.-]*anthropic\.com>\s*$/i,
+  /^\s*claude-session:\s*https?:\/\//i,
+  /^\s*(?:\u{1F916}\s*)?generated with \[?claude code\]?/iu,
+  /^\s*https:\/\/claude\.ai\/code\/session[_-]/i,
+];
+
+let text;
+
+try {
+  text = fs.readFileSync(file, 'utf8');
+} catch {
+  process.exit(0);
+}
+
+const kept = text.split('\n').filter((line) => !DROP.some((re) => re.test(line)));
+
+// A trailer block at the end takes its blank separator line with it, or the message ends in the
+// gap where the attribution used to be.
+while (kept.length > 1 && kept[kept.length - 1].trim() === '') {
+  kept.pop();
+}
+
+const out = `${ kept.join('\n') }\n`;
+
+if (out !== text) {
+  fs.writeFileSync(file, out);
+}

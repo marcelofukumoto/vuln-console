@@ -183,7 +183,9 @@ function openingPrompt(
  * this bundle carries.
  */
 async function writeSeed(target: PodRef, workspace: string): Promise<void> {
-  const wanted = ['job.sh', SETUP_SCRIPT, ...Object.values(PROMPTS)];
+  // verifying.md is not an action's prompt - it is the shared half that several of them point
+  // at, so it goes in alongside them rather than being repeated in each.
+  const wanted = ['job.sh', SETUP_SCRIPT, 'verifying.md', ...Object.values(PROMPTS)];
 
   for (const name of wanted) {
     const content = SEED_FILES[name];

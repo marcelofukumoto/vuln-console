@@ -1,0 +1,36 @@
+#!/bin/bash
+# Block until this workspace's browser (CDP) and its Rancher answer, then exit 0.
+#
+# Taken from the Dev extension's agent seed, unchanged.
+#
+# The harness's version of this starts the sidecars first. Here there is nothing to start: the
+# browser is a container in this pod and the Rancher is the one this workspace was pointed at,
+# both of which are up whenever the workspace is. What is left is the wait, which is the part a
+# skill actually needs - Chromium takes a few seconds after the pod starts to answer on 9222.
+#
+# Usage:
+#   wait-for-sidecars              # wait for browser (CDP) + rancher
+#   wait-for-sidecars browser      # wait for browser only
+#   wait-for-sidecars rancher      # wait for rancher only
+#   TIMEOUT=120 wait-for-sidecars  # override timeout seconds (default 180)
+set -e
+TIMEOUT="${TIMEOUT:-180}"
+TARGETS="${*:-browser rancher}"
+CDP="${CLAUDE_BROWSER_CDP:-http://localhost:9222}"
+RANCHER="${RANCHER_URL:-${API:-}}"
+
+check_browser() { curl -sf --max-time 2 "$CDP/json/version" >/dev/null 2>&1; }
+check_rancher() { curl -ksf --max-time 3 "$RANCHER/ping" >/dev/null 2>&1; }
+
+end=$(( $(date +%s) + TIMEOUT ))
+for target in $TARGETS; do
+  while :; do
+    case "$target" in
+      browser) check_browser && { echo "browser: CDP is up at $CDP"; break; } ;;
+      rancher) check_rancher && { echo "rancher: $RANCHER answers"; break; } ;;
+      *) echo "wait-for-sidecars: unknown target $target" >&2; exit 2 ;;
+    esac
+    if [ "$(date +%s)" -ge "$end" ]; then echo "wait-for-sidecars: timed out waiting for $target" >&2; exit 1; fi
+    sleep 2
+  done
+done

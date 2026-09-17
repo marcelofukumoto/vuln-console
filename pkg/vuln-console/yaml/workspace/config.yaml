@@ -21,3 +21,7 @@ data:
     @@include:seed/workspace/browser.mjs@@
   rancher-login.mjs: |
     @@include:seed/workspace/rancher-login.mjs@@
+  wait-for-sidecars: |
+    @@include:seed/workspace/wait-for-sidecars@@
+  commit-msg: |
+    @@include:seed/workspace/commit-msg@@
