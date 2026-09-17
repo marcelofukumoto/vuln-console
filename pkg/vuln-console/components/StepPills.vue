@@ -70,7 +70,16 @@ const branch = computed(() => job.value?.branch || (props.row.pr?.status === 'op
  * pill is a link to the recording rather than a stale offer to make one.
  */
 const video = computed(() => job.value?.videoUrl || props.row.pr?.videoUrl || null);
-const published = computed(() => !!video.value && /^https?:\/\//.test(video.value));
+/** On the pull request, where a reviewer sees it without leaving the diff. The end state. */
+const attached = computed(() => /user-attachments/.test(video.value || ''));
+
+/**
+ * Watchable, but only from here: served by the workspace's dev server through the Rancher proxy.
+ *
+ * Worth distinguishing from attached, because it dies with the workspace - it is something to
+ * look at before deciding to publish, not somewhere to leave it.
+ */
+const watchable = computed(() => !attached.value && /^https?:\/\//.test(video.value || ''));
 
 /**
  * Nothing is offered for a row with no fix available.
@@ -171,16 +180,30 @@ const branchUrl = computed(() => (branch.value ? `https://github.com/${ props.fo
           href is a link that goes nowhere. It used to fall through to offering Record again,
           which hid a recording that had just taken ninety seconds to make.
         -->
-        <a v-if="published" class="steps__link" :href="video || '#'" target="_blank" rel="noopener">
+        <a v-if="attached" class="steps__link" :href="video || '#'" target="_blank" rel="noopener">
           <RcStatusBadge status="success">Recording</RcStatusBadge>
         </a>
-        <template v-else-if="video">
-          <RcStatusBadge status="success" :title="`recorded in the workspace at ${ video }`">
-            Recording ready
-          </RcStatusBadge>
+        <template v-else-if="watchable">
+          <a
+            class="steps__link"
+            :href="video || '#'"
+            target="_blank"
+            rel="noopener"
+            title="served by this fix's workspace — watch it before deciding to publish it"
+          >
+            <RcStatusBadge status="success">Watch recording</RcStatusBadge>
+          </a>
           <RcButton v-if="pr" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'publish')">
             <span>Add it to the pull request</span>
           </RcButton>
+          <RcButton variant="link" size="small" :disabled="busy" @click="emit('act', 'record')">
+            <span>Re-record</span>
+          </RcButton>
+        </template>
+        <template v-else-if="video">
+          <RcStatusBadge status="warning" :title="`recorded at ${ video }, which is a path inside the workspace rather than a link`">
+            Recorded, not served
+          </RcStatusBadge>
           <RcButton variant="link" size="small" :disabled="busy" @click="emit('act', 'record')">
             <span>Re-record</span>
           </RcButton>

@@ -25,6 +25,7 @@ import { podExec, podRunScript, podWriteFile, shellQuote } from './exec';
 import type { PodRef } from './exec';
 import { readJobs, writeJob } from './store';
 import { mintRancherToken, rancherTokenKey, tokenKey } from './credentials';
+import { ghBrowserCdp, ghBrowserStatus } from './gh-browser';
 import { ensureWorkspace, workspaceName } from './workspace';
 import type { Store } from './workspace';
 import { SEED_FILES } from '../seed.generated';
@@ -319,6 +320,12 @@ export async function startAction(options: StartOptions): Promise<Job> {
         await mintRancherToken(principalId, `vuln-console ${ board.id } ${ library }`)
           .catch(() => undefined);
 
+        // Only when it is actually up: a CDP endpoint for a browser that is not running is
+        // worse than none, because the uploader would wait on it rather than saying there is
+        // nothing to upload with.
+        const browserState = await ghBrowserStatus(principalId).catch(() => null);
+        const ghBrowser = browserState?.state === 'ready' ? ghBrowserCdp(principalId) : '';
+
         await podRunScript(
           target,
           [
@@ -331,6 +338,10 @@ export async function startAction(options: StartOptions): Promise<Job> {
             shellQuote(library),
             shellQuote(rancherTokenKey(principalId)),
             shellQuote(window.location.origin),
+            // This person's own GitHub browser, when they have set one up. Empty otherwise,
+            // which is allowed - the recording is still made and served, it is just attached to
+            // the pull request by hand.
+            shellQuote(ghBrowser),
           ].join(' '),
           `prepare the workspace for ${ board.repo }`,
           WORKSPACE_READY_MS,

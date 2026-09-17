@@ -9,20 +9,23 @@ play without leaving the diff.
 policy call, a POST to the bucket it names, then a confirm. A token cannot do it and neither can
 `gh`. A release asset is not a substitute: it renders as a link, not a player.
 
-So there is a tool, and it drives the **shared** browser in `extension-studio` — not this
-workspace's sidecar, which is signed in to Rancher rather than to GitHub:
+So there is a tool, and it drives **the browser this person set up for themselves** from the
+console's Credentials dialog — a Chromium of their own that they signed in to GitHub once. Not
+this workspace's sidecar, which is signed in to Rancher rather than GitHub, and not a shared one:
+an upload should be done by whoever asked for it.
 
 ```
 node $WSD/bin/gh-attach.mjs --check                       # is that browser signed in?
 node $WSD/bin/gh-attach.mjs <file> <pull-request-url>     # prints the attachment URL
 ```
 
-**Check first.** If it says `not signed in`, stop and record that: somebody has to sign that
-browser in to GitHub once, through its own UI, and no amount of retrying here will do it. Say so
-plainly rather than falling back to a release asset or a link to a file nobody else can reach:
+**Check first.** If `$GITHUB_BROWSER_CDP` is empty they have not set one up; if `--check` says
+`not signed in` they have but have not signed in yet. Either way, stop and record it — the fix
+is a human opening the Credentials dialog, and no amount of retrying here substitutes. The
+recording is already watchable at its `videoUrl`, so nothing is lost by saying so:
 
 ```
-$ROOT/job.sh <board> "<library>" message="recording is staged but the shared browser is not signed in to GitHub, so it could not be attached"
+$ROOT/job.sh <board> "<library>" message="recording is at its videoUrl but could not be attached: set up a GitHub browser in the console's Credentials dialog and sign it in"
 ```
 
 ## When it is signed in

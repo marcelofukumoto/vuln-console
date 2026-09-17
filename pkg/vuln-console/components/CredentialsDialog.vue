@@ -10,13 +10,15 @@
 // is what decides between "Set" and "Replace" - so the field says "leave blank to keep" instead
 // of showing a value somebody could shoulder-read.
 //
-// The token is shared with Extension Studio on purpose. It is the same credential - an account's
-// token, reused by everything publishing on their behalf - so if that extension already has one
-// this borrows it rather than asking for a second copy to keep in step.
-import { computed, ref } from 'vue';
+// It is NOT shared with Extension Studio, which was the first design here: that extension keeps
+// one `gh_token` for the whole installation, so borrowing it would mean everybody acting as one
+// anonymous account - the thing per-user credentials exist to avoid.
+import { computed, onMounted, ref } from 'vue';
 import { Banner } from '@components/Banner';
 import { saveCredentials } from '../lib/credentials';
 import type { CredentialStatus } from '../lib/credentials';
+import { ensureGhBrowser, ghBrowserStatus } from '../lib/gh-browser';
+import type { GhBrowserStatus } from '../lib/gh-browser';
 
 const props = defineProps<{
   status: CredentialStatus;
@@ -34,6 +36,41 @@ const emit = defineEmits<{
 
 const github = ref('');
 const showGithub = ref(false);
+
+/**
+ * The person's own GitHub browser, which is how a recording gets onto a pull request.
+ *
+ * Optional on purpose: without one everything works except the automatic attachment, and the
+ * console says so rather than failing. Nothing about it is stored - the session lives in that
+ * browser's profile - so setting it up is spawning it and signing in, and nothing else.
+ */
+const browser = ref<GhBrowserStatus>({ state: 'absent', url: '' });
+const spawning = ref(false);
+
+async function refreshBrowser() {
+  browser.value = await ghBrowserStatus(props.principalId).catch(() => browser.value);
+}
+
+async function setUpBrowser() {
+  spawning.value = true;
+  error.value = '';
+
+  try {
+    browser.value = await ensureGhBrowser(props.principalId);
+
+    // It takes a little while to answer; poll rather than making somebody reopen the dialog.
+    for (let i = 0; i < 40 && browser.value.state !== 'ready'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await refreshBrowser();
+    }
+  } catch (e: any) {
+    error.value = e?.message || String(e);
+  } finally {
+    spawning.value = false;
+  }
+}
+
+onMounted(refreshBrowser);
 const saving = ref(false);
 const error = ref('');
 
@@ -136,6 +173,49 @@ async function clear() {
         <button v-if="ghStored" type="button" class="creds__clear" :disabled="saving" @click="clear()">
           Remove the stored token
         </button>
+      </label>
+
+      <label class="creds__field">
+        <span class="creds__label">
+          GitHub browser
+          <span class="creds__state" :class="{ 'is-set': browser.state === 'ready' }">
+            {{ browser.state === 'ready' ? 'Running' : browser.state === 'starting' ? 'Starting…' : 'Not set up' }}
+          </span>
+        </span>
+        <span class="creds__hint">
+          Only needed to put a verification recording <em>on</em> a pull request. GitHub has no
+          API for that — it is a browser flow — so this spawns a browser of your own, you sign it
+          in to GitHub once, and uploads go through it as you. Nothing is stored: the session
+          lives in that browser.
+          <template v-if="browser.state === 'absent'">
+            Without one, recordings are still made — you attach them yourself.
+          </template>
+        </span>
+
+        <span class="creds__browser">
+          <button
+            v-if="browser.state === 'absent'"
+            type="button"
+            class="btn role-secondary"
+            :disabled="spawning"
+            data-testid="vc-spawn-browser"
+            @click.prevent="setUpBrowser"
+          >
+            {{ spawning ? 'Starting it…' : 'Set up my GitHub browser' }}
+          </button>
+          <template v-else>
+            <a
+              class="btn role-secondary"
+              :href="browser.url"
+              target="_blank"
+              rel="noopener"
+              data-testid="vc-open-browser"
+            >Open it and sign in to GitHub</a>
+            <span v-if="browser.state === 'starting'" class="creds__hint">
+              still starting — the link works once it is up
+            </span>
+          </template>
+        </span>
       </label>
 
       <Banner color="info" class="creds__note">
@@ -300,6 +380,14 @@ async function clear() {
     &:hover {
       text-decoration: underline;
     }
+  }
+
+  &__browser {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
   }
 
   &__note {

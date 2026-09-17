@@ -1,0 +1,50 @@
+#!/usr/bin/with-contenv bash
+# Taken from Extension Studio (extensions.ts, CDP_PROXY), unchanged.
+#
+# s6 service (mounted into /custom-services.d/): exposes Chromium's CDP to the
+# compose network. Headful Chromium only binds 127.0.0.1:9222, so we forward
+# <container-ip>:9222 -> 127.0.0.1:9222. Connect using the IP, not the
+# service name - Chrome rejects non-localhost/non-IP Host headers.
+exec python3 - <<'PYEOF'
+import asyncio, socket
+
+def container_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(('10.255.255.255', 1))  # no traffic sent; selects default-route iface
+    ip = s.getsockname()[0]
+    s.close()
+    return ip
+
+async def pipe(reader, writer):
+    try:
+        while True:
+            data = await reader.read(65536)
+            if not data:
+                break
+            writer.write(data)
+            await writer.drain()
+    except Exception:
+        pass
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+
+async def handle(client_r, client_w):
+    try:
+        upstream_r, upstream_w = await asyncio.open_connection('127.0.0.1', 9222)
+    except Exception:
+        client_w.close()
+        return
+    await asyncio.gather(pipe(client_r, upstream_w), pipe(upstream_r, client_w))
+
+async def main():
+    ip = container_ip()
+    server = await asyncio.start_server(handle, ip, 9222)
+    print(f'cdp-proxy: {ip}:9222 -> 127.0.0.1:9222', flush=True)
+    async with server:
+        await server.serve_forever()
+
+asyncio.run(main())
+PYEOF

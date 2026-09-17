@@ -78,4 +78,14 @@ chmod 644 "$WS/src/.workspace.vue.config.js"
 grep -qxF '.workspace.vue.config.js' "$WS/src/.git/info/exclude" 2>/dev/null \
   || echo '.workspace.vue.config.js' >> "$WS/src/.git/info/exclude"
 
+# Where a recording goes to be WATCHED before anybody publishes it.
+#
+# The dev server serves `public/` at its root, and the dev server is already reachable through
+# the Rancher proxy with the viewer's own session - so a file dropped here is a link that works,
+# with no second server, no ingress and no credential. Excluded from git, because an artefact
+# must never turn up in a fix's diff.
+mkdir -p "$WS/src/public/vc-artifacts"
+grep -qxF 'public/vc-artifacts/' "$WS/src/.git/info/exclude" 2>/dev/null \
+  || echo 'public/vc-artifacts/' >> "$WS/src/.git/info/exclude"
+
 exec /bin/bash /workspace-config/serve.sh ${port}

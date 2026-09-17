@@ -26,6 +26,9 @@ RANCHER_TOKEN_KEY=${7:-}
 # rather than read from the pod: the workspace Deployment points at `$(NODE_IP)`, and a token
 # minted on a different origin answers 401 there for ever.
 RANCHER_URL=${8:-}
+# This person's OWN GitHub browser, spawned from the Credentials dialog. Empty when they have
+# not set one up, which is allowed: the recording is still made, it is just attached by hand.
+GH_BROWSER_CDP=${9:-}
 # So each step can name itself on the job, and the board can say what it is waiting for rather
 # than showing "Running" through five minutes of clone and install.
 BOARD=${5:-}
@@ -211,9 +214,15 @@ fi
 #
 # CLAUDE_BROWSER_CDP is the name browser.mjs reads. The Deployment also sets VULN_BROWSER_CDP,
 # and both point at the sidecar sharing this pod's localhost.
-printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nNODE_PATH=%s\nRANCHER_TOKEN=%s\nRANCHER_URL=%s\nAPI=%s\n' \
+# Where this workspace is reachable from a browser: the Rancher the token is for, plus the
+# service-proxy path the pod was told at boot. Anything under $WS/src/public is served there, so
+# VULN_PREVIEW_URL + /vc-artifacts/<file> is a link somebody can open with their Rancher session.
+PREVIEW=''
+[ -n "$RANCHER_URL" ] && [ -n "$DEV_PROXY_PATH" ] && PREVIEW="${RANCHER_URL}${DEV_PROXY_PATH}"
+
+printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nNODE_PATH=%s\nRANCHER_TOKEN=%s\nRANCHER_URL=%s\nAPI=%s\nGITHUB_BROWSER_CDP=%s\nVULN_PREVIEW_URL=%s\n' \
   "$TOKEN" "$TOKEN" "$FORK" "$REPO" "${VULN_BROWSER_CDP:-http://localhost:9222}" "$WS/node_modules" \
-  "$RANCHER_TOKEN" "$RANCHER_URL" "$RANCHER_URL" > "$WS/.env"
+  "$RANCHER_TOKEN" "$RANCHER_URL" "$RANCHER_URL" "$GH_BROWSER_CDP" "$PREVIEW" > "$WS/.env"
 chmod 600 "$WS/.env"
 
 # Prove the browser works too, for the same reason: a recording that cannot be made is worth
@@ -246,7 +255,8 @@ stage preparing
 printf '%s' "$GH_TOKEN" | kube exec -i -n "$NS" "deploy/$NS" -c workspace -- \
   setpriv --reuid=1000 --regid=1000 --init-groups \
   /usr/bin/env HOME="$WS/.home" WS="$WS" FORK="$FORK" REPO="$REPO" \
-  RANCHER_TOKEN="$RANCHER_TOKEN" RANCHER_URL="${RANCHER_URL:-}" \
+  RANCHER_TOKEN="$RANCHER_TOKEN" RANCHER_URL="${RANCHER_URL:-}" GH_BROWSER_CDP="$GH_BROWSER_CDP" \
+  DEV_PROXY_PATH="$(kube get deployment "$NS" -n "$NS" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="DEV_PROXY_PATH")].value}' 2>/dev/null)" \
   /bin/sh "$WS/.vc-setup.sh"
 
 kube exec -n "$NS" "deploy/$NS" -c workspace -- rm -f "$WS/.vc-setup.sh" >/dev/null 2>&1 || true
