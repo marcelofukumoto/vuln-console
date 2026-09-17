@@ -201,7 +201,12 @@ async function writeSeed(target: PodRef, workspace: string): Promise<void> {
       throw new Error(`This build is missing its ${ name } - run "yarn gen-seed" and rebuild.`);
     }
 
-    await podWriteFile(target, `${ ROOT }/${ name }`, content, { mode: '644', owner: POD_USER });
+    // job.sh is run, the prompts are read. The board tells an agent to invoke `$ROOT/job.sh`
+    // directly, and at 644 that is "Permission denied" - it only worked when an agent happened
+    // to write `sh job.sh` instead, which is not something the instruction says to do.
+    const mode = name.endsWith('.sh') ? '755' : '644';
+
+    await podWriteFile(target, `${ ROOT }/${ name }`, content, { mode, owner: POD_USER });
   }
 
   await podWriteFile(target, `${ ROOT }/shell-${ workspace }.sh`, shellWrapper(workspace), {

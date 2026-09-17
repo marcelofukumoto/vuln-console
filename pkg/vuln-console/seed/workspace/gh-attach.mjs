@@ -11,12 +11,16 @@
 // turn the same flow its my-pr-create skill runs. Keep the three in step.
 //
 // WHICH BROWSER. Not this workspace's sidecar - that one is signed in to Rancher, not GitHub.
-// The one holding a github.com session is the SHARED browser in extension-studio, which a
-// person signs in once and which every extension here borrows. So this connects across the
-// cluster to that one.
+// The one holding a github.com session is the browser the person spawned for themselves from
+// the console's Credentials dialog and signed in by hand: one per Rancher user, its profile on
+// the node, nothing shared and no cookie stored anywhere. Its address arrives as
+// GITHUB_BROWSER_CDP, so this connects across the cluster to that one.
+//
+// There is no fallback. Borrowing Extension Studio's shared browser would upload as whoever
+// signed that one in, which is exactly what the per-user design exists to prevent.
 //
 //   node gh-attach.mjs <file> <pull-request-url>
-//   node gh-attach.mjs --check                    # say whether the shared browser is signed in
+//   node gh-attach.mjs --check                    # say whether that browser is signed in
 //
 // It prints the https://github.com/user-attachments/assets/... URL and nothing else, so a
 // caller can use `$(node gh-attach.mjs …)` directly.
@@ -25,8 +29,7 @@ import { lookup } from 'node:dns/promises';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-const SHARED = process.env.GITHUB_BROWSER_CDP
-  || 'http://browser.extension-studio.svc.cluster.local:9222';
+const BROWSER = process.env.GITHUB_BROWSER_CDP;
 
 /** GitHub rejects the policy call when the extension and the content type disagree. */
 const TYPES = {
@@ -40,6 +43,15 @@ const TYPES = {
   '.mov': 'video/quicktime',
 };
 
+// Progress, on stderr so stdout stays exactly the attachment URL a caller captures. Every
+// step here has hung at least once, and a run that prints nothing for ten minutes is
+// indistinguishable from one doing the work.
+const started = Date.now();
+
+function note(what) {
+  process.stderr.write(`gh-attach: ${ what } (+${ Math.round((Date.now() - started) / 1000) }s)\n`);
+}
+
 function fail(message) {
   process.stderr.write(`gh-attach: ${ message }\n`);
   process.exit(1);
@@ -47,11 +59,11 @@ function fail(message) {
 
 /**
  * Chromium's CDP refuses a Host header that is not localhost or an IP - its anti DNS-rebinding
- * guard - and the shared browser is reached by service name. Resolving first is the whole fix;
+ * guard - and the browser is reached by service name. Resolving first is the whole fix;
  * without it every call comes back "Host header is specified and is not an IP address".
  */
 async function endpoint() {
-  const url = new URL(SHARED);
+  const url = new URL(BROWSER);
 
   if (url.hostname !== 'localhost' && !/^[0-9.]+$/.test(url.hostname)) {
     url.hostname = (await lookup(url.hostname)).address;
@@ -60,12 +72,20 @@ async function endpoint() {
   return url.origin;
 }
 
-/** The page-side half. Runs inside the shared browser, on the pull request's own page. */
+/** The page-side half. Runs inside that browser, on the pull request's own page. */
 const uploadInPage = async({ b64, name, ct }) => {
+  // Every request gets a deadline. GitHub's bucket POST can stall - a 2 MB upload that never
+  // finishes and never fails looks exactly like one still going, and the whole run hung with
+  // no output for twelve minutes before anyone could say which step it was on.
+  const deadline = (ms) => (AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined);
+  const step = (s) => { window.__ghAttachStep = s; };
+
+  step('token');
+
   const token = document.querySelector('input.js-data-upload-policy-url-csrf')?.value;
 
   if (!token) {
-    throw new Error('no upload token on the page - the shared browser is not signed in to GitHub');
+    throw new Error('no upload token on the page - your GitHub browser is not signed in');
   }
 
   const repoId = document.querySelector('file-attachment[data-upload-repository-id]')
@@ -80,8 +100,10 @@ const uploadInPage = async({ b64, name, ct }) => {
   policyForm.append('repository_id', String(repoId));
   policyForm.append('authenticity_token', token);
 
+  step('policy');
+
   const policyResp = await fetch('/upload/policies/assets', {
-    method: 'POST', headers: { Accept: 'application/json' }, body: policyForm,
+    method: 'POST', headers: { Accept: 'application/json' }, body: policyForm, signal: deadline(60000),
   });
 
   if (!policyResp.ok) {
@@ -97,7 +119,11 @@ const uploadInPage = async({ b64, name, ct }) => {
 
   form.append('file', new Blob([bytes], { type: ct }), name);
 
-  const upload = await fetch(policy.upload_url, { method: 'POST', body: form, mode: 'cors' });
+  step('upload');
+
+  const upload = await fetch(policy.upload_url, {
+    method: 'POST', body: form, mode: 'cors', signal: deadline(180000),
+  });
 
   if (!upload.ok) {
     throw new Error(`upload ${ upload.status }: ${ (await upload.text()).slice(0, 200) }`);
@@ -110,8 +136,10 @@ const uploadInPage = async({ b64, name, ct }) => {
 
     body.append('authenticity_token', policy.asset_upload_authenticity_token);
 
+    step('confirm');
+
     const confirmed = await fetch(policy.asset_upload_url, {
-      method: 'PUT', headers: { Accept: 'application/json' }, body,
+      method: 'PUT', headers: { Accept: 'application/json' }, body, signal: deadline(60000),
     });
 
     if (!confirmed.ok) {
@@ -119,18 +147,35 @@ const uploadInPage = async({ b64, name, ct }) => {
     }
   }
 
+  step('done');
+
   return policy.asset.href;
 };
 
 async function main() {
   const args = process.argv.slice(2);
-  const cdp = await endpoint().catch(() => fail(`cannot resolve ${ SHARED }`));
-  const browser = await chromium.connectOverCDP(cdp)
-    .catch(() => fail(`the shared browser is not reachable at ${ SHARED }`));
+
+  if (!BROWSER) {
+    fail('GITHUB_BROWSER_CDP is not set - set up a GitHub browser in the console\'s Credentials '
+      + 'dialog and sign it in, then run the action again.');
+  }
+
+  note(`resolving ${ BROWSER }`);
+
+  const cdp = await endpoint().catch(() => fail(`cannot resolve ${ BROWSER }`));
+
+  note('connecting over CDP');
+
+  const browser = await chromium.connectOverCDP(cdp, { timeout: 30000 })
+    .catch(() => fail(`your GitHub browser is not reachable at ${ BROWSER }`));
+  note('connected');
+
   const context = browser.contexts()[0];
 
   if (args[0] === '--check') {
-    const page = await context.newPage();
+    note('opening a page');
+
+  const page = await context.newPage();
 
     await page.goto('https://github.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
 
@@ -174,15 +219,45 @@ async function main() {
   const page = await context.newPage();
 
   try {
+    note(`loading ${ prUrl }`);
     await page.goto(prUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    note('waiting for the comment box');
     // The token only exists once the comment box has rendered, which is not at DOMContentLoaded
     // on a heavy pull request page.
-    await page.waitForSelector('input.js-data-upload-policy-url-csrf', { timeout: 60000 })
-      .catch(() => {
-        throw new Error('the pull request page never rendered a comment box - the shared browser is probably not signed in to GitHub');
+    //
+    // `state: 'attached'` is the whole reason this ever worked. The default is 'visible', and
+    // the CSRF token is a HIDDEN input - it cannot ever become visible, so the default wait
+    // could only ever run out the clock. Every attempt to attach a recording failed here, and
+    // the catch below blamed the sign-in, so the real cause stayed hidden through a browser
+    // cookie, a shared browser and finally a browser per person - none of which were the fault.
+    await page.waitForSelector('input.js-data-upload-policy-url-csrf', { state: 'attached', timeout: 60000 })
+      .catch(async(e) => {
+        // Say what was actually wrong. This used to assert "probably not signed in" whatever
+        // happened, which sent a signed-in browser round a diagnosis it could never pass - the
+        // token was on the page the whole time and the failure was something else entirely.
+        const seen = await page.evaluate(() => ({
+          url:    location.href,
+          title:  document.title.slice(0, 60),
+          token:  !!document.querySelector('input.js-data-upload-policy-url-csrf'),
+          login:  document.querySelector('meta[name="user-login"]')?.content || null,
+          forms:  document.querySelectorAll('file-attachment').length,
+        })).catch(() => null);
+
+        throw new Error(`no comment box: ${ String(e?.message || e).split('\n')[0] } | page: ${ JSON.stringify(seen) }`);
       });
 
-    const href = await page.evaluate(uploadInPage, { b64, name, ct });
+    note(`uploading ${ name }`);
+
+    // A ceiling on the whole page-side upload. `page.evaluate` has no default timeout, so
+    // without this a stalled request is an unkillable run that prints nothing.
+    const href = await Promise.race([
+      page.evaluate(uploadInPage, { b64, name, ct }),
+      new Promise((_, reject) => setTimeout(async() => {
+        const at = await page.evaluate(() => window.__ghAttachStep).catch(() => 'unknown');
+
+        reject(new Error(`the upload stalled at the "${ at }" step after 5 minutes`));
+      }, 300000)),
+    ]);
 
     process.stdout.write(`${ href }\n`);
   } finally {
