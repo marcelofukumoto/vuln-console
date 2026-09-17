@@ -121,6 +121,29 @@ export const BOARDS: Board[] = [
       },
     ],
   },
+  {
+    id:        'harvester-ui-extension',
+    label:     'Harvester UI',
+    repo:      'harvester/harvester-ui-extension',
+    devScheme: 'http',
+    /**
+     * Shell only - it does NOT use `@rancher/cypress`, which rancher-ai-ui does. Declaring
+     * cypress here would draw a group that is permanently empty.
+     *
+     * Having nineteen direct dependencies to ai-ui's one, I expected most of its
+     * vulnerabilities to be its own. Measured on the first gather, they are not: 15 of 19 open
+     * libraries still arrive through `@rancher/shell` and only 4 are reachable from anything
+     * else - `ip`, which is a direct dependency, and `elliptic`, `fast-uri` and `js-yaml`,
+     * which come through shell AND through a polyfill plugin or commitlint. Counting direct
+     * dependencies predicts very little about who owns the tree; walking the lockfile is the
+     * only thing that answers it, which is why this is computed per board and not assumed.
+     */
+    rancherPackages: [
+      {
+        name: '@rancher/shell', label: 'Rancher shell', upstreamRepo: 'rancher/dashboard', manifest: 'shell/package.json',
+      },
+    ],
+  },
 ];
 
 export function boardById(id: string): Board {
