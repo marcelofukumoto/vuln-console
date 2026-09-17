@@ -22,8 +22,6 @@ const props = defineProps<{
   /** Where this board's branches are pushed, so the branch pill links to the right fork. */
   fork: string;
   /** The package this repository gets most of its tree from, when it has one. */
-  ownerPackage?: string;
-  ownerVersion?: string;
   /** True while this row's own run is going. */
   busy: boolean;
 }>();
@@ -90,39 +88,21 @@ const watchable = computed(() => !attached.value && /^https?:\/\//.test(video.va
 const unfixable = computed(() => props.row.unfixable);
 
 /**
- * Nothing is offered for a row this repository does not really own either.
+ * A row here always belongs to something this repository can fix.
  *
- * The library is in the tree only because the owner package put it there, so the honest fix is
- * bumping that package - not pinning a transitive override in a repository whose lockfile will
- * be overwritten by the next shell release anyway. Saying where the fix belongs is more useful
- * than a button that produces a pull request nobody should merge.
+ * Rows that arrive through a Rancher package are drawn by the board itself, under that
+ * package's group, with one button for the whole group - so StepPills is never asked about
+ * them. What used to be here was a "Comes from @rancher/shell" badge on a row filed under a
+ * single owner; grouping says the same thing in a place where it is also actionable, and says
+ * it for every package that reaches the library rather than just one.
  */
-const ownedElsewhere = computed(() => props.row.ownerOnly && !!props.ownerPackage);
-
-const ownerNote = computed(() => [
-  `Only in this repository because of ${ props.ownerPackage }`,
-  props.ownerVersion ? ` ${ props.ownerVersion }` : '',
-  '. The fix is a ',
-  props.ownerPackage,
-  ' bump, not a lockfile change here.',
-].join(''));
-
 const branchUrl = computed(() => (branch.value ? `https://github.com/${ props.fork }/tree/${ branch.value }` : null));
 </script>
 
 <template>
   <div class="steps">
     <RcStatusBadge
-      v-if="ownedElsewhere"
-      status="info"
-      :title="ownerNote"
-      data-testid="vc-owned-elsewhere"
-    >
-      Comes from {{ ownerPackage }}
-    </RcStatusBadge>
-
-    <RcStatusBadge
-      v-else-if="unfixable"
+      v-if="unfixable"
       status="unknown"
       title="No patched version is available — Dependabot has no fix for this advisory, so there is nothing to bump to."
     >

@@ -72,7 +72,7 @@ export async function refreshSnapshot(board: Board, principalId: string): Promis
       shellQuote(board.id),
       shellQuote(board.repo),
       shellQuote(tokenKey(principalId)),
-      shellQuote(board.ownerPackage || ''),
+      shellQuote(JSON.stringify(board.rancherPackages || [])),
     ].join(' '),
     `gather the Dependabot alerts for ${ board.repo }`,
     GATHER_TIMEOUT_MS,

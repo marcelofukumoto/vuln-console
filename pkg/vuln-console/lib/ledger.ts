@@ -200,7 +200,31 @@ function attribute(alert: Alert, input: LedgerInput, ourPrs: PullRequest[]): Pul
   return null;
 }
 
-function group(rows: { alert: Alert; pr: PullRequest | null }[], ownerOnly: Set<string>): VulnGroup[] {
+/**
+ * How each library relates to the Rancher packages this repository depends on.
+ *
+ * Not exclusive: a library can arrive through several at once, and also through something that
+ * is neither. `fixableHere` is the second half of that - true when a non-Rancher dependency
+ * reaches it too, so an override in this repository would genuinely clear it rather than being
+ * overwritten by the next release of somebody else's package.
+ */
+function rancherFor(library: string, snapshot: Snapshot) {
+  const packages = snapshot.rancherPackages || [];
+  const sources = snapshot.sources?.[library] || [];
+  const names = new Set(packages.map((rp) => rp.name));
+
+  return {
+    rancher: packages
+      .filter((rp) => sources.includes(rp.name))
+      .map((rp) => ({ name: rp.name, label: rp.label, state: rp.upstream?.[library] || 'open' })),
+    // No attribution at all (a board with no Rancher packages, or a library the walk could not
+    // place) is treated as fixable here: that is the board this was before grouping existed,
+    // and refusing a Fix on missing information would hide work rather than describe it.
+    fixableHere: !sources.length || sources.some((name) => !names.has(name)),
+  };
+}
+
+function group(rows: { alert: Alert; pr: PullRequest | null }[], snapshot: Snapshot): VulnGroup[] {
   const byLibrary = new Map<string, { alert: Alert; pr: PullRequest | null }[]>();
 
   for (const row of rows) {
@@ -227,7 +251,7 @@ function group(rows: { alert: Alert; pr: PullRequest | null }[], ownerOnly: Set<
       pr:        members.map((m) => m.pr).find((pr) => pr !== null) || null,
       vulns,
       unfixable: vulns.length > 0 && vulns.every((v) => !v.patched),
-      ownerOnly: ownerOnly.has(library),
+      ...rancherFor(library, snapshot),
     });
   }
 
@@ -243,11 +267,10 @@ export function buildLedger(input: LedgerInput): Ledger {
   const openPrOpen = rows.filter((r) => r.alert.state === 'open' && r.pr?.status === 'open');
   const prMerged = rows.filter((r) => r.alert.state !== 'open' && r.pr?.status === 'merged');
 
-  const ownerOnly = new Set(snapshot.ownerOnly || []);
   const lists = {
-    openNoPr:   group(openNoPr, ownerOnly),
-    openPrOpen: group(openPrOpen, ownerOnly),
-    prMerged:   group(prMerged, ownerOnly),
+    openNoPr:   group(openNoPr, snapshot),
+    openPrOpen: group(openPrOpen, snapshot),
+    prMerged:   group(prMerged, snapshot),
   };
 
   // Counts are ALERTS, not rows. A library with four advisories is one row and four

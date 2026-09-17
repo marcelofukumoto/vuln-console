@@ -20,7 +20,7 @@ REPO=${3:?gather.sh needs a repository}
 # done as them and "our pull requests" means theirs.
 TOKEN_KEY=${4:?gather.sh needs the token key}
 # Optional: the package this repository gets most of its tree from. Empty for one that is its own.
-OWNER_PACKAGE=${5:-}
+RANCHER_PACKAGES=${5:-[]}
 SEED=$(dirname "$0")
 
 [ -d "$DIR" ] || { echo "gather.sh: no such directory: $DIR" >&2; exit 2; }
@@ -63,7 +63,7 @@ GH_TOKEN="$GH_TOKEN" node -e \
   'require("fs").writeFileSync(process.argv[1], JSON.stringify({ GH_TOKEN: process.env.GH_TOKEN }))' \
   "$CREDS"
 
-CREDS_FILE="$CREDS" OUT="$SNAPSHOT" VULN_REPO="$REPO" OWNER_PACKAGE="$OWNER_PACKAGE" \
+CREDS_FILE="$CREDS" OUT="$SNAPSHOT" VULN_REPO="$REPO" RANCHER_PACKAGES="$RANCHER_PACKAGES" \
   node "$SEED/gather.mjs"
 
 cleanup

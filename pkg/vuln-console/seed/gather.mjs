@@ -17,11 +17,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const REPO = process.env.VULN_REPO || 'rancher/dashboard';
 
 /**
- * The package this repository gets most of its tree from, if it has one.
+ * The Rancher packages this repository gets most of its tree from, as JSON.
  *
- * Empty for a repository that is its own tree. Set, it turns on the lockfile walk below.
+ * Empty for a repository that is its own tree. Set, it turns on the lockfile walk below. Each
+ * entry is `{ name, label, upstreamRepo, manifest }` - see RancherPackage in config/constants.
  */
-const OWNER_PACKAGE = process.env.OWNER_PACKAGE || '';
+const RANCHER_PACKAGES = JSON.parse(process.env.RANCHER_PACKAGES || '[]');
 const OUT = process.env.OUT || './snapshot.json';
 const API = process.env.GITHUB_API || 'https://api.github.com';
 
@@ -396,45 +397,94 @@ function reachable(entries, roots) {
   return seen;
 }
 
-/** Package names out of a set of `name@range` specs. */
-function namesOf(specs) {
-  const names = new Set();
+/** The package name out of one `name@range` spec. Scoped names keep their leading `@`. */
+function nameOf(spec) {
+  const at = spec.lastIndexOf('@');
 
-  for (const spec of specs) {
-    const at = spec.lastIndexOf('@');
-
-    if (at > 0) {
-      names.add(spec.slice(0, at));
-    }
-  }
-
-  return names;
+  return at > 0 ? spec.slice(0, at) : spec;
 }
 
-async function repoFile(path) {
-  const resp = await fetch(`${ API }/repos/${ REPO }/contents/${ path }`, {
+
+async function repoFile(path, repo = REPO) {
+  const resp = await fetch(`${ API }/repos/${ repo }/contents/${ path }`, {
     headers: { ...HEADERS, Accept: 'application/vnd.github.raw' },
   });
 
   if (!resp.ok) {
-    throw new Error(`reading ${ path }: HTTP ${ resp.status }`);
+    throw new Error(`reading ${ path } from ${ repo }: HTTP ${ resp.status }`);
   }
 
   return resp.text();
 }
 
 /**
- * Which vulnerable libraries are in the tree ONLY because of the owner package.
- *
- * Walked from the lockfile rather than guessed from the alert's `relationship`, because every
- * alert on a repository like this one is `transitive` - that field says the library is not a
- * direct dependency, not who pulled it in. rancher-ai-ui's `extract-zip` and `tmp` are
- * transitive too, and they come from Cypress and Jest; calling them shell's would be wrong in a
- * way somebody would only discover by trying to fix one.
+ * Compare two versions by their numeric parts. Enough for "is this at least the patch".
  */
-async function ownedLibraries() {
-  if (!OWNER_PACKAGE) {
-    return { ownerOnly: [], ownerVersion: '' };
+function atLeast(have, need) {
+  const a = (String(have).match(/\d+/g) || ['0']).slice(0, 3).map(Number);
+  const b = (String(need).match(/\d+/g) || ['0']).slice(0, 3).map(Number);
+
+  while (a.length < 3) { a.push(0); }
+  while (b.length < 3) { b.push(0); }
+
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) { return a[i] > b[i]; }
+  }
+
+  return true;
+}
+
+/**
+ * Which direct dependencies actually reach each vulnerable library, and whether the Rancher
+ * packages among them have already dealt with it upstream.
+ *
+ * Walked from the lockfile, never guessed from the alert's `relationship`: every alert on a
+ * repository like this one is `transitive`, which says the library is not a direct dependency,
+ * not who pulled it in.
+ *
+ * This replaces an "only through the owner package" test, which was wrong in a way that showed:
+ * it asked whether a library arrives EXCLUSIVELY through `@rancher/shell`, so anything cypress
+ * or jest also reaches was filed as the repository's own. On rancher-ai-ui that marked 6 of 15
+ * libraries as shell's when 13 of them arrive through shell. Membership is not exclusive - the
+ * same library can come through shell AND cypress AND jest - so the answer is the SET of direct
+ * dependencies that reach it, and the board groups on that.
+ *
+ * "Has rancher fixed it already" is asked of the upstream workspace's OWN subtree, not of the
+ * whole upstream lockfile: a monorepo resolves copies for packages this one never pulls, and
+ * counting those answers a question nobody asked. Three outcomes per package:
+ *
+ *   fixed   - every version that workspace resolves is at or past the patch
+ *   gone    - that workspace does not pull the library at all any more, so a bump removes the
+ *             path entirely. Worth its own answer: it is a fix even where no patch exists.
+ *   open    - it still resolves something vulnerable, so bumping the package changes nothing
+ */
+/**
+ * The newest version published for a package, or '' if the registry cannot say.
+ *
+ * Without this the board can promise a fix it cannot deliver. rancher had fixed fourteen of
+ * rancher-ai-ui's libraries on dashboard master while `@rancher/shell`'s newest RELEASE was
+ * 3.0.13 - the version ai-ui already had. "Fixed upstream" and "there is something to bump to"
+ * are different questions and the second one is the one a button depends on.
+ */
+async function latestPublished(name) {
+  try {
+    const resp = await fetch(`https://registry.npmjs.org/${ name.replace('/', '%2f') }`, {
+      headers: { Accept: 'application/vnd.npm.install-v1+json' },
+    });
+
+    if (!resp.ok) {
+      return '';
+    }
+
+    return (await resp.json())['dist-tags']?.latest || '';
+  } catch {
+    return '';
+  }
+}
+
+async function rancherAttribution(vulnerable, alerts) {
+  if (!RANCHER_PACKAGES.length) {
+    return { sources: {}, packages: [] };
   }
 
   const [manifest, lock] = await Promise.all([repoFile('package.json'), repoFile('yarn.lock')]);
@@ -442,38 +492,114 @@ async function ownedLibraries() {
   const direct = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
   const entries = parseLock(lock);
 
-  const ownerRoots = [];
-  const otherRoots = [];
+  // Which direct dependencies reach each vulnerable library.
+  const sources = {};
 
   for (const [name, range] of Object.entries(direct)) {
-    (name === OWNER_PACKAGE ? ownerRoots : otherRoots).push(`${ name }@${ range }`);
+    const root = `${ name }@${ range }`;
+
+    if (!entries.has(root)) {
+      continue;
+    }
+
+    for (const spec of reachable(entries, [root])) {
+      const lib = nameOf(spec);
+
+      if (vulnerable.has(lib)) {
+        (sources[lib] = sources[lib] || []).push(name);
+      }
+    }
   }
 
-  if (!ownerRoots.length) {
-    return { ownerOnly: [], ownerVersion: '' };
+  for (const lib of Object.keys(sources)) {
+    sources[lib] = [...new Set(sources[lib])].sort();
   }
 
-  const viaOwner = namesOf(reachable(entries, ownerRoots));
-  const viaOther = namesOf(reachable(entries, otherRoots));
-  const ownerOnly = [...viaOwner].filter((name) => !viaOther.has(name)).sort();
+  // The highest patch any open alert asks for, per library.
+  const needed = {};
 
-  return { ownerOnly, ownerVersion: entries.get(ownerRoots[0])?.version || '' };
+  for (const alert of alerts) {
+    if (alert.state === 'open' && alert.patched && (!needed[alert.library] || atLeast(alert.patched, needed[alert.library]))) {
+      needed[alert.library] = alert.patched;
+    }
+  }
+
+  const packages = [];
+
+  for (const rp of RANCHER_PACKAGES) {
+    const here = entries.get(`${ rp.name }@${ direct[rp.name] }`);
+    const version = here?.version || '';
+    const latest = await latestPublished(rp.name);
+    const record = {
+      name:    rp.name,
+      label:   rp.label,
+      version,
+      latest,
+      // Something to bump TO. False means the fixes are on master and not yet in a release,
+      // which the board says rather than offering a button that would find nothing to change.
+      newerRelease: !!(latest && version && latest !== version && atLeast(latest, version)),
+      upstreamRepo: rp.upstreamRepo,
+      upstream:     {},
+    };
+
+    try {
+      const [upManifest, upLock] = await Promise.all([
+        repoFile(rp.manifest, rp.upstreamRepo),
+        repoFile('yarn.lock', rp.upstreamRepo),
+      ]);
+      const up = JSON.parse(upManifest);
+      const upEntries = parseLock(upLock);
+      const roots = Object.entries({ ...(up.dependencies || {}), ...(up.devDependencies || {}) })
+        .map(([n, r]) => `${ n }@${ r }`)
+        .filter((spec) => upEntries.has(spec));
+
+      record.upstreamVersion = up.version || '';
+
+      const resolved = {};
+
+      for (const spec of reachable(upEntries, roots)) {
+        const lib = nameOf(spec);
+        const version = upEntries.get(spec)?.version;
+
+        if (vulnerable.has(lib) && version) {
+          (resolved[lib] = resolved[lib] || []).push(version);
+        }
+      }
+
+      for (const lib of vulnerable) {
+        if (!(sources[lib] || []).includes(rp.name)) {
+          continue;
+        }
+
+        const have = resolved[lib];
+
+        if (!have) {
+          record.upstream[lib] = 'gone';
+        } else if (!needed[lib]) {
+          record.upstream[lib] = 'open';
+        } else {
+          record.upstream[lib] = have.every((v) => atLeast(v, needed[lib])) ? 'fixed' : 'open';
+        }
+      }
+    } catch (e) {
+      // Not fatal, and not silently "fixed" either: with no upstream answer every row reads
+      // `unknown`, the group offers no bump, and the reason is on the record.
+      record.error = String(e?.message || e);
+    }
+
+    packages.push(record);
+  }
+
+  return { sources, packages };
 }
 
 async function main() {
   // First, because everything "ours" is defined by it.
   const owner = await tokenOwner();
-  const [alerts, dependabotPrs, ourPrs, owned] = await Promise.all([
+  const [alerts, dependabotPrs, ourPrs] = await Promise.all([
     fetchAlerts(),
     fetchDependabotPulls(),
     fetchOurPulls(owner),
-    // Never fatal: a board that cannot read its own lockfile is a board with no owner
-    // information, which is the same board it was before this existed - not a failed gather.
-    ownedLibraries().catch((e) => {
-      process.stderr.write(`gather: could not work out what ${ OWNER_PACKAGE } owns (${ e?.message || e })\n`);
-
-      return { ownerOnly: [], ownerVersion: '' };
-    }),
   ]);
 
   // A transient failure must never be written as an empty snapshot. The console this replaces
@@ -488,6 +614,15 @@ async function main() {
   // Only the vulnerable libraries are worth storing, not the whole reachable set - the set is
   // thousands of names and the board only ever asks about the ones it draws.
   const vulnerable = new Set(alerts.map((a) => a.library));
+
+  // Not fatal: a board that cannot read a lockfile is a board with no grouping, which is the
+  // board it was before this existed - not a failed gather.
+  const attribution = await rancherAttribution(vulnerable, alerts).catch((e) => {
+    process.stderr.write(`gather: could not attribute the tree (${ e?.message || e })\n`);
+
+    return { sources: {}, packages: [] };
+  });
+
   const snapshot = {
     gatheredAt: new Date().toISOString(),
     repo:       REPO,
@@ -495,10 +630,9 @@ async function main() {
     alerts,
     dependabotPrs,
     ourPrs,
-    ...(OWNER_PACKAGE ? {
-      ownerPackage: OWNER_PACKAGE,
-      ownerVersion: owned.ownerVersion,
-      ownerOnly:    owned.ownerOnly.filter((name) => vulnerable.has(name)),
+    ...(attribution.packages.length ? {
+      rancherPackages: attribution.packages,
+      sources:         attribution.sources,
     } : {}),
   };
 
@@ -506,9 +640,14 @@ async function main() {
 
   const open = alerts.filter((a) => a.state === 'open').length;
 
-  const owns = snapshot.ownerOnly?.length
-    ? `, ${ snapshot.ownerOnly.length } only via ${ OWNER_PACKAGE } ${ snapshot.ownerVersion }`
-    : '';
+  const owns = (snapshot.rancherPackages || [])
+    .map((rp) => {
+      const states = Object.values(rp.upstream || {});
+      const fixed = states.filter((s) => s === 'fixed' || s === 'gone').length;
+
+      return `, ${ states.length } via ${ rp.name } ${ rp.version } (${ fixed } already fixed upstream)`;
+    })
+    .join('');
 
   process.stderr.write(
     `gather: ${ alerts.length } alerts (${ open } open), ${ dependabotPrs.length } Dependabot pull requests, ${ ourPrs.length } by ${ owner }${ owns } -> ${ OUT }\n`,

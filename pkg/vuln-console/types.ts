@@ -73,18 +73,53 @@ export interface Snapshot {
   /** Our pull requests on the target repository, open and recently merged. */
   ourPrs: PullRequest[];
 
-  /** The package most of this repository's tree comes from, when it has one. */
-  ownerPackage?: string;
-  /** The version of it this repository is pinned to, for the row's explanation. */
-  ownerVersion?: string;
   /**
-   * Libraries that reach the tree ONLY through the owner package.
+   * The Rancher packages this repository's tree comes through, and what upstream has done.
    *
-   * Worked out by walking the lockfile from each direct dependency: a library reachable from the
-   * owner and from nothing else is one this repository cannot bump on its own terms. Anything
-   * reachable another way too is left alone, because a fix here would genuinely clear it.
+   * Absent for a repository that is its own tree (dashboard).
    */
-  ownerOnly?: string[];
+  rancherPackages?: RancherPackageState[];
+
+  /**
+   * For each vulnerable library, the DIRECT dependencies that actually reach it.
+   *
+   * Walked from the lockfile. A library commonly has several - `js-yaml` arrives through
+   * `@rancher/shell`, through `@rancher/cypress` and through `jest` - which is why the board
+   * groups rather than files each library in one place, and why this is a list.
+   */
+  sources?: Record<string, string[]>;
+}
+
+/** How a library stands in one Rancher package's own upstream subtree. */
+export type UpstreamState =
+  /** Every version that workspace resolves is at or past the patch. */
+  | 'fixed'
+  /** That workspace does not pull the library at all any more, so a bump removes it entirely. */
+  | 'gone'
+  /** It still resolves something vulnerable: bumping the package would change nothing. */
+  | 'open';
+
+/** One Rancher package a board depends on, as the gather found it. */
+export interface RancherPackageState {
+  name: string;
+  label: string;
+  /** What this repository has pinned. */
+  version: string;
+  /** The newest version published to the registry. */
+  latest: string;
+  /**
+   * Whether there is actually something to bump to.
+   *
+   * False means upstream may well have fixed things, but only on its main branch - no release
+   * carries them yet, so a bump would find nothing to change. The board says so instead of
+   * offering a button that cannot work.
+   */
+  newerRelease: boolean;
+  upstreamRepo: string;
+  /** Per library, how it stands in that package's upstream subtree. */
+  upstream: Record<string, UpstreamState>;
+  /** Set when the upstream could not be read; every row then reads unknown. */
+  error?: string;
 }
 
 /** One row of the board: a library, its alerts, and the pull request tied to them. */
@@ -95,8 +130,16 @@ export interface VulnGroup {
   vulns: Alert[];
   /** True when every alert lacks a patched version - there is nothing to bump to. */
   unfixable: boolean;
-  /** True when this library is only in the tree because of the owner package. */
-  ownerOnly: boolean;
+  /**
+   * The Rancher packages that reach this library, and how each stands upstream.
+   *
+   * Empty for a library that arrives some other way. Non-empty does NOT mean the row has no fix
+   * of its own: a library can come through shell AND through jest, and then both the group's
+   * bump and a local override are real options.
+   */
+  rancher: { name: string; label: string; state: UpstreamState }[];
+  /** True when something other than a Rancher package also reaches it - so it is fixable here. */
+  fixableHere: boolean;
 }
 
 export interface Ledger {

@@ -18,6 +18,26 @@ export const NAMESPACE = 'vuln-console';
  * Everything a board owns is namespaced by its `id`: its snapshot, its jobs and its workspaces.
  * Two boards never share an object, so a fix on one cannot be confused for a fix on the other.
  */
+/**
+ * A Rancher package a board depends on, and where the fix for it actually lands.
+ *
+ * `upstreamRepo` + `manifest` say which subtree upstream to judge against. Both `@rancher/shell`
+ * and `@rancher/cypress` are published from the rancher/dashboard monorepo - different
+ * workspaces of one repository sharing one lockfile - so the question "has rancher fixed this
+ * already" is asked of that workspace's own dependencies, not of the whole lockfile. Asking the
+ * whole lockfile reports copies that this package never pulls.
+ */
+export interface RancherPackage {
+  /** The dependency as this board's package.json names it. */
+  name: string;
+  /** A short name for its group on the board. */
+  label: string;
+  /** The repository the package is published from. */
+  upstreamRepo: string;
+  /** The manifest of the workspace inside it that builds the package. */
+  manifest: string;
+}
+
 export interface Board {
   id: string;
   label: string;
@@ -45,18 +65,21 @@ export interface Board {
   prTarget?: string;
 
   /**
-   * The package this repository gets most of its tree from, if it has one.
+   * The Rancher packages this repository gets most of its tree from.
    *
-   * `rancher-ai-ui` has exactly one runtime dependency - `@rancher/shell`, pinned exact - and
-   * everything else is dev tooling. So most of its vulnerabilities are not its own: they are
-   * shell's, seen from here, and the fix for them is a shell bump rather than a lockfile edit in
-   * this repository.
+   * `rancher-ai-ui` has exactly one runtime dependency - `@rancher/shell`, pinned exact - plus
+   * `@rancher/cypress` for its tests, and everything else is dev tooling. So most of its
+   * vulnerabilities are not its own: they are shell's or cypress's, seen from here, and the fix
+   * is to bump that package rather than pin an override in a lockfile the next release
+   * overwrites.
    *
-   * When this is set the gather works out which vulnerable libraries reach the tree ONLY through
-   * it, and the board offers no Fix for those - it says where the fix belongs instead. A
-   * repository that IS the shell (dashboard) has no owner and every row is its own to fix.
+   * A library can belong to several of these at once, and also be reachable from something that
+   * is neither - `js-yaml` arrives through shell, through cypress AND through jest. So this is
+   * a list and membership is not exclusive; the board groups by it rather than filing each
+   * library in one place. A repository that IS the shell (dashboard) declares none, and every
+   * row there is its own to fix.
    */
-  ownerPackage?: string;
+  rancherPackages?: RancherPackage[];
 
   /**
    * What this repository's dev server speaks. Defaults to https.
@@ -79,8 +102,15 @@ export const BOARDS: Board[] = [
     id:           'rancher-ai-ui',
     label:        'Rancher AI UI',
     repo:         'rancher/rancher-ai-ui',
-    ownerPackage: '@rancher/shell',
     devScheme:    'http',
+    rancherPackages: [
+      {
+        name: '@rancher/shell', label: 'Rancher shell', upstreamRepo: 'rancher/dashboard', manifest: 'shell/package.json',
+      },
+      {
+        name: '@rancher/cypress', label: 'Rancher cypress', upstreamRepo: 'rancher/dashboard', manifest: 'cypress/package.json',
+      },
+    ],
   },
 ];
 

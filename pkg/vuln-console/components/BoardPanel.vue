@@ -69,18 +69,19 @@ function runFor(library: string) {
  *
  *   0  started   a run of ours, or a pull request of ours, already exists
  *   1  fixable   nothing yet, and a fix here would clear it
- *   2  elsewhere the library is only in the tree because of the owner package
+ *   2  waiting   it arrives through a Rancher package, so the group's bump is the fix
  *   3  no fix    no patched version exists at all
  *
- * `ownerOnly` is tested before `unfixable` so the row says where the fix belongs rather than
- * that there isn't one, which is the same order the pills draw them in.
+ * The Rancher case is tested before `unfixable` so the row says where the fix belongs rather
+ * than that there isn't one - and a library with no patch published anywhere can still be
+ * cleared by a bump that stops pulling it, which is the honest order to read them in.
  */
 function actionRank(row: VulnGroup, job: Job | null): number {
   if (job || row.pr?.status === 'open') {
     return 0;
   }
 
-  if (row.ownerOnly && props.board.ownerPackage) {
+  if (!row.fixableHere && row.rancher.length) {
     return 2;
   }
 
@@ -103,6 +104,22 @@ function manifests(row: VulnGroup): string[] {
  * worse: the question a board answers is "what is open", and splitting it means counting two
  * lists to find out.
  */
+/**
+ * The Rancher packages this board depends on, in the order their groups appear.
+ */
+const rancherPackages = computed(() => snapshot.value?.rancherPackages || []);
+
+const NOT_RANCHER = 'Not related to a Rancher package';
+
+/**
+ * One row per (library, group) rather than one per library.
+ *
+ * A library is not in one group: `js-yaml` arrives through `@rancher/shell`, through
+ * `@rancher/cypress` AND through jest, and all three are true at once. Filing it under the
+ * first one found would hide two of the three answers - and it is the jest path that made the
+ * local override we actually shipped the right fix. So it appears under each, and the key
+ * carries the group so the table can tell the copies apart.
+ */
 const rows = computed(() => {
   const l = ledger.value;
 
@@ -110,18 +127,72 @@ const rows = computed(() => {
     return [];
   }
 
-  // The sortable columns need real fields to sort on: a header that names a key the row has not
-  // got sorts by nothing, which is how this first rendered with a HIGH row below two MEDIUM ones.
-  return [...l.lists.openPrOpen, ...l.lists.openNoPr].map((row) => ({
-    ...row,
-    id:           row.library,
-    job:          jobs.value.find((j) => j.library === row.library) || null,
-    stale:        mergedButStillOpen(row),
-    severityRank: severityRank(row.severity),
-    actionRank:   actionRank(row, jobs.value.find((j) => j.library === row.library) || null),
-    manifests:    manifests(row),
-  }));
+  const order = new Map(rancherPackages.value.map((rp, i) => [rp.label, i]));
+
+  order.set(NOT_RANCHER, -1);
+
+  const out = [];
+
+  for (const row of [...l.lists.openPrOpen, ...l.lists.openNoPr]) {
+    const job = jobs.value.find((j) => j.library === row.library) || null;
+    const base = {
+      ...row,
+      job,
+      stale:        mergedButStillOpen(row),
+      severityRank: severityRank(row.severity),
+      actionRank:   actionRank(row, job),
+      manifests:    manifests(row),
+    };
+
+    const groups = [
+      ...(row.fixableHere ? [{ label: NOT_RANCHER, state: null }] : []),
+      ...row.rancher.map((r) => ({ label: r.label, state: r.state })),
+    ];
+
+    for (const g of groups) {
+      out.push({
+        ...base,
+        id:        `${ g.label }:${ row.library }`,
+        group:     g.label,
+        groupRank: order.get(g.label) ?? 99,
+        // Null in the ungrouped group: the row keeps its own buttons there.
+        upstream:  g.state,
+      });
+    }
+  }
+
+  return out;
 });
+
+/**
+ * What a group's single button can do.
+ *
+ * One button for the whole group, because the fix is one thing: bump that package. It needs
+ * both halves to be true - something upstream actually fixed, and a release carrying it.
+ * Rancher had fixed fourteen of these on dashboard master while the newest published
+ * `@rancher/shell` was the version already installed, so "fixed upstream" on its own would
+ * offer a bump that finds nothing to change.
+ */
+function groupState(label: string) {
+  const rp = rancherPackages.value.find((r) => r.label === label);
+
+  if (!rp) {
+    return null;
+  }
+
+  const mine = rows.value.filter((r) => r.group === label);
+  const fixed = mine.filter((r) => r.upstream === 'fixed' || r.upstream === 'gone').length;
+
+  return {
+    rp,
+    fixed,
+    total:   mine.length,
+    canFix:  fixed > 0 && rp.newerRelease,
+    why:     !fixed
+      ? `nothing here is fixed in ${ rp.name } yet`
+      : (rp.newerRelease ? '' : `fixed in ${ rp.upstreamRepo }, but ${ rp.latest } is the newest release and this repository already has it`),
+  };
+}
 
 const headers = [
   {
@@ -243,6 +314,8 @@ onUnmounted(() => {
         :rows="rows"
         :headers="headers"
         key-field="id"
+        :group-by="rancherPackages.length ? 'group' : null"
+        group-sort="groupRank"
         :sub-rows="true"
         :sub-rows-description="false"
         :table-actions="false"
@@ -251,6 +324,32 @@ onUnmounted(() => {
         default-sort-by="actions"
         no-rows-key="No open vulnerabilities."
       >
+        <!--
+          One heading per group, and for a Rancher package one BUTTON - because the fix for
+          everything under it is the same single act: bump that package. A Fix on each row
+          would be the same run started several times over the same lockfile.
+        -->
+        <template #group-by="{ group }">
+          <div class="board__group">
+            <strong>{{ group.ref }}</strong>
+            <template v-if="groupState(group.ref)">
+              <span class="board__group-count">
+                {{ groupState(group.ref).fixed }} of {{ groupState(group.ref).total }} already fixed in
+                {{ groupState(group.ref).rp.upstreamRepo }}
+              </span>
+              <RcButton
+                v-if="groupState(group.ref).canFix"
+                variant="primary"
+                size="small"
+                @click="emit('act', { library: groupState(group.ref).rp.name, rancherPackage: true }, 'fix')"
+              >
+                <span>Bump {{ groupState(group.ref).rp.name }} to {{ groupState(group.ref).rp.latest }}</span>
+              </RcButton>
+              <span v-else class="board__group-why">{{ groupState(group.ref).why }}</span>
+            </template>
+          </div>
+        </template>
+
         <template #col:severity="{ row }">
           <td>
             <RcStatusBadge :status="severityStatus(row.severity)">
@@ -304,12 +403,22 @@ onUnmounted(() => {
 
         <template #col:actions="{ row }">
           <td>
+            <!--
+              Under a Rancher package a row has no buttons of its own: what it has is a fact
+              about upstream, and the group's single button acts on all of them. The same
+              library under "not related" keeps its buttons, because there the fix IS local.
+            -->
+            <div v-if="row.upstream" class="board__upstream">
+              <RcStatusBadge :status="row.upstream === 'open' ? 'warning' : 'success'">
+                {{ row.upstream === 'open' ? 'Still not fixed on rancher' : 'Already fixed on rancher' }}
+              </RcStatusBadge>
+              <span v-if="row.upstream === 'gone'" class="board__group-why">no longer pulled in</span>
+            </div>
             <StepPills
+              v-else
               :row="row"
               :job="row.job"
               :fork="forkFor(board, snapshot?.tokenLogin || '')"
-              :owner-package="snapshot?.ownerPackage"
-              :owner-version="snapshot?.ownerVersion"
               :busy="false"
               @act="emit('act', row, $event)"
               @stop="emit('stop', row.job)"
@@ -358,6 +467,24 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 // The same measurements as the reports console, on purpose.
 .board {
+  &__group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  &__group-count,
+  &__group-why {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  &__upstream {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   &__run-row td {
     border-top: none;
     padding: 0 12px 10px;
