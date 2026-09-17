@@ -173,6 +173,31 @@ const rows = computed(() => {
  * `@rancher/shell` was the version already installed, so "fixed upstream" on its own would
  * offer a bump that finds nothing to change.
  */
+/**
+ * What the group's button actually sends.
+ *
+ * A real row, not a stand-in: the run is started with `group.vulns`, and a synthetic object
+ * without them produces a prompt that names the package and lists nothing for it to check. So
+ * this carries the open alerts of every library the bump would clear - which is also the list
+ * the agent should verify afterwards - and leaves out the ones it would not, because claiming
+ * those would have the run chasing vulnerabilities this bump cannot touch.
+ */
+function groupFixRow(label: string): VulnGroup {
+  const rp = rancherPackages.value.find((r) => r.label === label);
+  const cleared = rows.value.filter((r) => r.group === label && (r.upstream === 'fixed' || r.upstream === 'gone'));
+  const vulns = cleared.flatMap((r) => r.vulns).filter((v) => v.state === 'open');
+
+  return {
+    library:     rp?.name || label,
+    severity:    vulns.map((v) => v.severity).sort((a, b) => severityRank(a) - severityRank(b))[0] || 'low',
+    pr:          null,
+    vulns,
+    unfixable:   false,
+    rancher:     [],
+    fixableHere: true,
+  };
+}
+
 function groupState(label: string) {
   const rp = rancherPackages.value.find((r) => r.label === label);
 
@@ -341,7 +366,7 @@ onUnmounted(() => {
                 v-if="groupState(group.ref).canFix"
                 variant="primary"
                 size="small"
-                @click="emit('act', { library: groupState(group.ref).rp.name, rancherPackage: true }, 'fix')"
+                @click="emit('act', groupFixRow(group.ref), 'fix')"
               >
                 <span>Bump {{ groupState(group.ref).rp.name }} to {{ groupState(group.ref).rp.latest }}</span>
               </RcButton>
