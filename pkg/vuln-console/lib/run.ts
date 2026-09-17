@@ -213,36 +213,11 @@ async function writeSeed(target: PodRef, workspace: string): Promise<void> {
     mode: '755', owner: POD_USER,
   });
 
-  // A real skill, not just a file the prompt points at.
-  //
-  // The agents pod runs claude with HOME here, and claude discovers skills under
-  // `$HOME/.claude/skills/<name>/SKILL.md` - Anthropic's own synced skills are already there.
-  // So verification guidance can be a skill rather than a paragraph an agent may or may not
-  // read, and it is found by anyone working in this pod, not only by our own runs.
-  //
-  // A thin wrapper, deliberately: verifying.md stays the single source of truth, the way this
-  // team's own skills wrap their prompts rather than restating them.
-  await podWriteFile(target, `${ AGENT_HOME }/.claude/skills/vuln-verifying/SKILL.md`, [
-    '---',
-    'name: vuln-verifying',
-    'description: >-',
-    '  Verify a dependency fix in a vulnerability-console workspace and record it: which browser',
-    '  to drive, which recorder makes a clip a person can follow, and where an artefact has to go',
-    '  to become a link. Use whenever verifying, screenshotting or recording a fix.',
-    '---',
-    '',
-    `Read \`${ ROOT }/verifying.md\` in full and follow it. It is the specification, kept beside`,
-    'the action prompts so the two can never drift apart; this file only points at it.',
-    '',
-    'The two things most often got wrong:',
-    '',
-    '- Record with `$WSD/bin/record.mjs`, not a hand-rolled `recordVideo`. It captions and',
-    '  chapters the clip, so it explains rather than merely shows.',
-    '- Write artefacts into `$WSD/artifacts/` and report that path. `job.sh` turns it into a URL',
-    '  people can open; a path inside a pod is not a link.',
-    '',
-  ].join('\n'), { mode: '644', owner: POD_USER });
-
+  // Nothing is written outside ROOT. A claude skill would have to live in this pod's shared
+  // `~/.claude/skills`, where it loads for every conversation in the pod - the agents
+  // extension's own agent and any other extension's runs, not only ours. This extension is a
+  // guest here. The prompts already say to read verifying.md in full, so the gain was small
+  // and the reach large; it is not ours to decide unasked.
   await podExec(target, ['/bin/sh', '-c', `chown ${ POD_USER } ${ ROOT } 2>/dev/null || true`], { timeoutMs: 15000 });
 }
 
