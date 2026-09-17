@@ -1,0 +1,15 @@
+nameOverride: ""
+fullnameOverride: ""
+plugin:
+  enabled: true
+  versionOverride: ""
+  endpoint: >-
+    https://raw.githubusercontent.com/marcelofukumoto/vuln-console/gh-pages/extensions/vuln-console/0.12.0
+  compressedEndpoint: >-
+    https://raw.githubusercontent.com/marcelofukumoto/vuln-console/gh-pages/extensions/vuln-console/0.12.0.tgz
+  noCache: false
+  noAuth: false
+  metadata:
+    catalog.cattle.io/display-name: Vulnerability Console
+    catalog.cattle.io/rancher-version: ">= 2.10.0"
+    catalog.cattle.io/ui-extensions-version: ">= 3.0.0 < 5.0.0"
