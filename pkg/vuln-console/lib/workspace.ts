@@ -90,12 +90,14 @@ export function workspaceApp(): Record<string, any> {
       description: 'A rancher/dashboard checkout with its dependencies installed, the dev server running, and a browser beside it — where one Dependabot fix is made and verified. The first start is minutes: a clone, a yarn install and a first compile.',
       // `port` is a number on purpose. apps-plus emits a declared number bare and a declared
       // string quoted, and a Service port that arrives as "8005" is one the apiserver refuses.
-      // The repository and the fork are DEFAULTS here and are overridden per installation: one
-      // App describes what a fix workspace is, and each board's installations point it at their
-      // own repository. Adding a board does not add an App.
+      // DEFAULTS, overridden by every installation: one App describes what a fix workspace is,
+      // and each board's installations point it at their own repository and at the fork of
+      // whoever's token is stored. `owner/repo` is a placeholder rather than a real account -
+      // nobody's name belongs in a shipped default - but it cannot be empty, because apps-plus
+      // drops an empty default and then `${fork}` renders as itself.
       values:      {
         repo:         'rancher/dashboard',
-        fork:         'marcelofukumoto/dashboard',
+        fork:         'owner/repo',
         port:         WORKSPACE_PORT,
         // The dashboard's dev server serves TLS from its own config, so the service proxy has
         // to be told to speak it too - otherwise every "is it up yet" is a 503.

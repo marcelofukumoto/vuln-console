@@ -34,11 +34,13 @@ export interface Board {
    */
   fork?: string;
   /**
-   * Where pull requests are opened.
+   * Where pull requests are opened. Unset means the repository itself.
    *
-   * Unset means the fork, which is where they go for now: branches and pull requests are made
-   * there first so a mistake costs nothing. Moving a board to its upstream is setting this to
-   * the upstream.
+   * The branch and the pull request go to different places, and that is the normal shape of
+   * contributing: the branch is pushed to the token owner's fork, because that is the only
+   * repository their token can write to, and the pull request is opened against the upstream
+   * from `<owner>:<branch>`. Set this only to aim a board somewhere else - at the fork, say,
+   * while trying something out.
    */
   prTarget?: string;
 
@@ -91,8 +93,8 @@ export function forkFor(board: Board, tokenLogin: string): string {
   return board.fork || (tokenLogin ? `${ tokenLogin }/${ repoName(board.repo) }` : '');
 }
 
-export function prTargetFor(board: Board, tokenLogin: string): string {
-  return board.prTarget || forkFor(board, tokenLogin);
+export function prTargetFor(board: Board): string {
+  return board.prTarget || board.repo;
 }
 
 /**

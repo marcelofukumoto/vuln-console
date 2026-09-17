@@ -157,8 +157,8 @@ function openingPrompt(
     `  workspace      ${ job.workspace } (your commands already run inside it)`,
     `  checkout       ${ WORKSPACES_ROOT }/${ job.workspace }/src`,
     `  repository     ${ board.repo }`,
-    `  push to        ${ fork } (remote "fork")`,
-    `  pull requests  ${ prTarget }`,
+    `  push to        ${ fork } (remote "fork") — your branch goes here`,
+    `  pull requests  ${ prTarget } — the pull request is opened against this, from ${ fork.split('/')[0] }:<branch>`,
     job.branch ? `  branch         ${ job.branch }` : '',
     job.prNumber ? `  pull request   ${ job.prNumber }` : '',
     alerts.length ? `  open alerts    ${ alerts.join('; ') }` : '',
@@ -227,7 +227,7 @@ export interface StartOptions {
 export async function startAction(options: StartOptions): Promise<Job> {
   const { store, board, tokenLogin, principalId, library, action, group = null, by } = options;
   const fork = forkFor(board, tokenLogin);
-  const prTarget = prTargetFor(board, tokenLogin);
+  const prTarget = prTargetFor(board);
 
   if (!fork) {
     throw new Error('There is no fork to push to: the board sets none and the stored token\'s account is not known yet. Refresh the board first.');
