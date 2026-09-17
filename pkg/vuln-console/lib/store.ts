@@ -185,12 +185,33 @@ export function jobName(board: string, library: string): string {
   return `${ JOB_PREFIX }${ board }-${ slug(library).slice(0, 40) || 'unnamed' }`;
 }
 
-export async function readJobs(board: string): Promise<Job[]> {
-  const selector = `${ OWNER_LABEL }=true,${ BOARD_LABEL }=${ board }`;
-  const list = await steve(`/configmaps?labelSelector=${ encodeURIComponent(selector) }`)
-    .catch(() => null);
+/**
+ * List the ConfigMaps in this extension's namespace carrying these labels.
+ *
+ * STEVE IGNORES `labelSelector`. Not rejects - ignores: the request answers 200 with the whole
+ * collection, every ConfigMap in every namespace of the cluster, and a caller that trusts the
+ * parameter reads other people's objects believing they matched. That is not hypothetical; it
+ * put another board's pull request on the Harvester board, because the only thing left
+ * narrowing the list was a name prefix that both boards share.
+ *
+ * So two defences, neither of them a query parameter. The collection is asked for by namespace
+ * - a path segment Steve does honour - and every label is checked here, on what came back.
+ */
+async function listOwned(labels: Record<string, string>): Promise<any[]> {
+  const list = await steve(`/configmaps/${ NAMESPACE }`).catch(() => null);
 
-  return (list?.data || [])
+  return (list?.data || []).filter((cm: any) => {
+    const have = cm?.metadata?.labels || {};
+
+    return cm?.metadata?.namespace === NAMESPACE &&
+      Object.entries(labels).every(([k, v]) => have[k] === v);
+  });
+}
+
+export async function readJobs(board: string): Promise<Job[]> {
+  const owned = await listOwned({ [OWNER_LABEL]: 'true', [BOARD_LABEL]: board });
+
+  return owned
     .filter((cm: any) => (cm?.metadata?.name || '').startsWith(JOB_PREFIX))
     .map((cm: any) => {
       try {
