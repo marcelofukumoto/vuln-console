@@ -49,6 +49,16 @@ const activeRuns = computed(() => jobs.value
   .sort((a, b) => b.startedAt - a.startedAt));
 
 /**
+ * The run going on for a row, if there is one.
+ *
+ * Runs are per library and several can be going at once - the board has never serialised them,
+ * only the old console did - so this is a lookup rather than "the" current run.
+ */
+function runFor(library: string) {
+  return activeRuns.value.find((job) => job.library === library);
+}
+
+/**
  * What a row's Status column says, as a sort key.
  *
  * The board is sorted by what you can DO with a row before it is sorted by how bad the row is,
@@ -172,33 +182,6 @@ onUnmounted(() => {
 
 <template>
   <div class="board">
-    <section
-      v-for="run in activeRuns"
-      :key="run.library"
-      class="board__running"
-      data-testid="vc-running"
-    >
-      <div class="board__running-head">
-        <i class="icon icon-spinner icon-spin" />
-        <strong>Fixing {{ run.library }}</strong>
-        <button
-          type="button"
-          class="board__running-stop"
-          title="Stop this run"
-          @click="emit('stop', run)"
-        >
-          Stop
-        </button>
-        <span>{{ elapsedLabel(run) }}</span>
-      </div>
-      <RunProgress
-        :phase="runPhase(run)"
-        :elapsed="elapsedLabel(run)"
-        :can-open-session="!!run.sessionId"
-        @open-session="emit('session', run)"
-      />
-    </section>
-
     <div v-if="loading" class="board__loading">
       <i class="icon icon-spinner icon-spin" />
       <span>Loading the board…</span>
@@ -260,6 +243,8 @@ onUnmounted(() => {
         :rows="rows"
         :headers="headers"
         key-field="id"
+        :sub-rows="true"
+        :sub-rows-description="false"
         :table-actions="false"
         :row-actions="false"
         :search="true"
@@ -335,6 +320,36 @@ onUnmounted(() => {
             </div>
           </td>
         </template>
+        <!--
+          The agent, under the library it is working on, rather than in a banner above a table
+          that may be showing several runs at once. Which row is working is then not something
+          to match up by name. SortableTable's own sub-row slot, so it is one table and the
+          columns stay aligned.
+        -->
+        <template #sub-row="{ row, fullColspan }">
+          <tr v-if="runFor(row.library)" class="board__run-row">
+            <td :colspan="fullColspan">
+              <div class="board__run">
+                <i class="icon icon-spinner icon-spin" />
+                <strong>{{ runFor(row.library).action === 'fix' ? 'Fixing' : runFor(row.library).action }}</strong>
+                <RunProgress
+                  :phase="runPhase(runFor(row.library))"
+                  :elapsed="elapsedLabel(runFor(row.library))"
+                  :can-open-session="!!runFor(row.library).sessionId"
+                  @open-session="emit('session', runFor(row.library))"
+                />
+                <button
+                  type="button"
+                  class="board__running-stop"
+                  title="Stop this run"
+                  @click="emit('stop', runFor(row.library))"
+                >
+                  Stop
+                </button>
+              </div>
+            </td>
+          </tr>
+        </template>
       </SortableTable>
     </template>
   </div>
@@ -343,6 +358,27 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 // The same measurements as the reports console, on purpose.
 .board {
+  &__run-row td {
+    border-top: none;
+    padding: 0 12px 10px;
+    background: var(--body-bg);
+  }
+
+  &__run {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-left: 3px solid var(--info);
+    border-radius: 4px;
+    background: var(--nav-bg);
+    font-size: 13px;
+
+    .icon {
+      color: var(--info);
+    }
+  }
+
   &__running {
     margin-bottom: 18px;
     padding: 12px 16px;

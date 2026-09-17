@@ -12,7 +12,8 @@ Nothing needs installing. A Chromium sidecar runs in this pod and everything bel
 |---|---|
 | `wait-for-sidecars` | blocks until the browser and Rancher answer. Chromium takes a few seconds after the pod starts, and a check that runs before it is up fails for no reason |
 | `rancher-login.mjs` | sets the Rancher session cookie from the token minted for you |
-| `browser.mjs` | drives the sidecar over CDP: `screenshot`, `record`, `record-script`, `goto`, `eval` |
+| `browser.mjs` | drives the sidecar over CDP: `screenshot`, `goto`, `eval` - and `record` when nobody will watch it |
+| `record.mjs` | the team's own recorder, from the `playwright-ui-testing` skill: captions, chapters and callouts on top of the cursor, ripples and keystroke badges. **Use this for any clip a person will watch.** |
 
 Do not install a browser, do not `npm i playwright`, and do not hand-roll a `recordVideo`
 script. `playwright-core` is already at `$WSD/node_modules`.
@@ -22,11 +23,19 @@ script. `playwright-core` is already at `$WSD/node_modules`.
 ```
 wait-for-sidecars
 node $WSD/bin/rancher-login.mjs
-node $WSD/bin/browser.mjs record-script <script.mjs> $WSD/artifacts/<slug>.webm
-ffmpeg -y -i <slug>.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart -an <slug>.mp4
+node $WSD/bin/record.mjs script <script.mjs> $WSD/artifacts/<slug>.mp4
 ```
 
-Deliver **mp4**: Safari cannot play webm, and mp4 is smaller.
+`record.mjs` attaches to the sidecar (`RECORD_CDP` is already set for you) and writes mp4
+directly - Safari cannot play webm, and mp4 is smaller. It takes a module whose default export is
+`async ({ page, click, type, caption, card, chapter, login, ... }) => { ... }`, so the clip says
+what is being shown rather than only showing it: `caption` each step, `chapter` each half of a
+before/after, `card` for a title people can read. Use its `click` and `type` rather than
+`page.click` - they draw the cursor, the ring and the keystroke badges. `node $WSD/bin/record.mjs`
+with no arguments prints the usage.
+
+A recording nobody can follow is not verification. `browser.mjs record` draws a cursor and
+ripples but has no captions - use it only for a capture nobody will watch.
 
 ## Make it watchable
 

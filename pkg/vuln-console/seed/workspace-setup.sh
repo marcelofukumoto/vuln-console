@@ -191,7 +191,7 @@ fi
 # The browser tool comes in from the ConfigMap the pod already mounts - it is 1488 lines, which
 # is not something to put on a command line. Same read-only-mode trap as the vue config: the
 # mount is 0555, so `cp` produces a file the next run cannot overwrite.
-for tool in browser.mjs rancher-login.mjs wait-for-sidecars gh-attach.mjs; do
+for tool in browser.mjs record.mjs rancher-login.mjs wait-for-sidecars gh-attach.mjs; do
   rm -f "$WS/bin/$tool"
   cp "/workspace-config/$tool" "$WS/bin/$tool"
   chmod 755 "$WS/bin/$tool"
@@ -215,13 +215,15 @@ fi
 # CLAUDE_BROWSER_CDP is the name browser.mjs reads. The Deployment also sets VULN_BROWSER_CDP,
 # and both point at the sidecar sharing this pod's localhost.
 # Where this workspace is reachable from a browser: the Rancher the token is for, plus the
-# service-proxy path the pod was told at boot. Anything under $WS/src/public is served there, so
-# VULN_PREVIEW_URL + /vc-artifacts/<file> is a link somebody can open with their Rancher session.
+# service-proxy path the pod was told at boot. The dev server publishes $WS/artifacts at
+# /vc-artifacts, so VULN_PREVIEW_URL + /vc-artifacts/<file> is a link somebody can open with
+# their own Rancher session. job.sh builds it; nothing has to be copied.
 PREVIEW=''
 [ -n "$RANCHER_URL" ] && [ -n "$DEV_PROXY_PATH" ] && PREVIEW="${RANCHER_URL}${DEV_PROXY_PATH}"
 
-printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nNODE_PATH=%s\nRANCHER_TOKEN=%s\nRANCHER_URL=%s\nAPI=%s\nGITHUB_BROWSER_CDP=%s\nVULN_PREVIEW_URL=%s\n' \
-  "$TOKEN" "$TOKEN" "$FORK" "$REPO" "${VULN_BROWSER_CDP:-http://localhost:9222}" "$WS/node_modules" \
+printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nRECORD_CDP=%s\nNODE_PATH=%s\nRANCHER_TOKEN=%s\nRANCHER_URL=%s\nAPI=%s\nGITHUB_BROWSER_CDP=%s\nVULN_PREVIEW_URL=%s\n' \
+  "$TOKEN" "$TOKEN" "$FORK" "$REPO" "${VULN_BROWSER_CDP:-http://localhost:9222}" \
+  "${VULN_BROWSER_CDP:-http://localhost:9222}" "$WS/node_modules" \
   "$RANCHER_TOKEN" "$RANCHER_URL" "$RANCHER_URL" "$GH_BROWSER_CDP" "$PREVIEW" > "$WS/.env"
 chmod 600 "$WS/.env"
 
