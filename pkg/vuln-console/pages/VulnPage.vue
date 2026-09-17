@@ -30,6 +30,8 @@ import { appsPlusInstalled, ensureWorkspaceApp } from '../lib/workspace';
 import { agentsStatus, whenAgentsReady } from '../lib/agents';
 import type { AgentsStatus } from '../lib/agents';
 import { refreshSnapshot } from '../lib/gather';
+import { ensureGatherCron } from '../lib/gather-cron';
+import { ensureNamespace } from '../lib/store';
 import { BOARDS, boardById } from '../config/constants';
 import type { Job, JobAction, VulnGroup } from '../types';
 
@@ -241,6 +243,17 @@ async function stop(job: Job | null): Promise<void> {
     error.value = e?.message || String(e);
   }
 }
+
+// Keep the half-hourly gather in the cluster, and matching this bundle.
+//
+// Not inside whenAgentsReady: the schedule has nothing to do with the agents extension - it is
+// the reason the board is current for somebody who has not opened it in a week, which is
+// exactly the case where no agent has been anywhere near it. Quiet on failure for the same
+// reason ensureWorkspaceApp is: a reader without the rights to write a CronJob should still
+// see the board.
+ensureNamespace()
+  .then(() => ensureGatherCron(BOARDS))
+  .catch(() => undefined);
 
 whenAgentsReady().then(async() => {
   const [status, creds] = await Promise.all([

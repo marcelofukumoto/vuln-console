@@ -193,8 +193,12 @@ export const GH_TOKEN_KEY = 'gh_token';
  * The Rancher token key.
  *
  * A fix is verified by driving a browser at the dev server, and that server proxies Rancher's
- * API to the real cluster - so without a session the browser photographs a login page. Minted
- * by the admin when they set the credentials, and used by every run.
+ * API to the real cluster - so without a session the browser photographs a login page.
+ *
+ * Not typed into the Credentials dialog like the GitHub one: it is minted same-origin at the
+ * start of each run, from the session of whoever pressed the button, and lands here only so
+ * the workspace setup can read it back out. The screenshots then show what that person can
+ * see, while the branch is pushed as the shared account.
  */
 export const RANCHER_TOKEN_KEY = 'rancher_token';
 
