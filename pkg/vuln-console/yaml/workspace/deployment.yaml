@@ -64,14 +64,14 @@ spec:
             httpGet:
               path: /index.html
               port: ${port}
-              scheme: HTTPS
+              scheme: ${probeScheme}
             periodSeconds: 10
             failureThreshold: 90
           readinessProbe:
             httpGet:
               path: /index.html
               port: ${port}
-              scheme: HTTPS
+              scheme: ${probeScheme}
             periodSeconds: 30
             failureThreshold: 3
           resources:

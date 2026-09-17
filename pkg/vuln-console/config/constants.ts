@@ -57,6 +57,16 @@ export interface Board {
    * repository that IS the shell (dashboard) has no owner and every row is its own to fix.
    */
   ownerPackage?: string;
+
+  /**
+   * What this repository's dev server speaks. Defaults to https.
+   *
+   * Not a preference — an observation, and it differs per repository. rancher/dashboard's own
+   * vue.config serves TLS; rancher-ai-ui goes through `@rancher/shell`'s and serves plain http.
+   * Getting it wrong is silent and total: the readiness probe never passes, so the pod never
+   * becomes Ready, and the service-proxy URL speaks the wrong protocol at it.
+   */
+  devScheme?: 'http' | 'https';
 }
 
 export const BOARDS: Board[] = [
@@ -70,6 +80,7 @@ export const BOARDS: Board[] = [
     label:        'Rancher AI UI',
     repo:         'rancher/rancher-ai-ui',
     ownerPackage: '@rancher/shell',
+    devScheme:    'http',
   },
 ];
 
@@ -95,6 +106,10 @@ export function forkFor(board: Board, tokenLogin: string): string {
 
 export function prTargetFor(board: Board): string {
   return board.prTarget || board.repo;
+}
+
+export function devSchemeFor(board: Board): 'http' | 'https' {
+  return board.devScheme || 'https';
 }
 
 /**

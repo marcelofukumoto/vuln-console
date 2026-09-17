@@ -17,7 +17,9 @@
 // by somebody who is not us, deployed by Fleet with real reconciliation and real teardown, and
 // it is the same App shape the dev extension already uses - so the two are recognisably the
 // same kind of thing rather than two inventions.
-import { BROWSER_PORT, WORKSPACE_APP, WORKSPACE_PORT } from '../config/constants';
+import {
+  BROWSER_PORT, WORKSPACE_APP, WORKSPACE_PORT, devSchemeFor,
+} from '../config/constants';
 import type { Board } from '../config/constants';
 import { MANIFESTS } from '../yaml.generated';
 
@@ -102,6 +104,7 @@ export function workspaceApp(): Record<string, any> {
         // The dashboard's dev server serves TLS from its own config, so the service proxy has
         // to be told to speak it too - otherwise every "is it up yet" is a 503.
         scheme:       'https',
+        probeScheme:  'HTTPS',
         image:        'node:24',
         hostCluster:  'local',
         // `$(NODE_IP)` is expanded by Kubernetes in the pod's environment, not by apps-plus:
@@ -115,6 +118,7 @@ export function workspaceApp(): Record<string, any> {
         fork:         'Fork the branch is pushed to',
         port:         'Port the dev server listens on',
         scheme:       'http or https',
+        probeScheme:  'HTTP or HTTPS, for the readiness probe',
         image:        'Container image',
         hostCluster:  'Cluster the workspace runs on',
         rancherUrl:   'Rancher the dev server points at',
@@ -207,7 +211,14 @@ export async function ensureWorkspace(
       app:              WORKSPACE_APP,
       namespace:        name,
       targets:          [{ clusterName: 'local' }],
-      values:           { repo: board.repo, fork },
+      values:           {
+        repo:        board.repo,
+        fork,
+        // Lower case for the service-proxy path, upper for the probe: Kubernetes wants
+        // `scheme: HTTPS` and the proxy wants `https:`, and the same value cannot be both.
+        scheme:      devSchemeFor(board),
+        probeScheme: devSchemeFor(board).toUpperCase(),
+      },
       provisionCluster: { enabled: false },
     },
   });
