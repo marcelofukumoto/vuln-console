@@ -128,10 +128,11 @@ export function workspaceApp(): Record<string, any> {
 /**
  * The App, created or brought up to date.
  *
- * Written every time the board loads rather than once, because the templates travel inside this
- * bundle: an extension upgrade that changes a workspace script must reach the App, or the next
- * fix runs last version's workspace. apps-plus redeploys the instances of an App when the App
- * is saved, which is the behaviour wanted here.
+ * Called when the board loads and again before any workspace is made, because the templates
+ * travel inside this bundle: an extension upgrade that changes a workspace script must reach the
+ * App, or every existing workspace keeps the scripts it was born with. apps-plus redeploys the
+ * instances of an App when the App is saved, which is exactly the behaviour wanted here - a
+ * script fix reaches a running workspace on the next page load.
  */
 export async function ensureWorkspaceApp(store: Store): Promise<void> {
   const desired = workspaceApp();
@@ -178,14 +179,20 @@ export async function ensureWorkspace(
   library: string,
 ): Promise<string> {
   const name = workspaceName(board.id, library);
+
+  // The App FIRST, and unconditionally. It carries the workspace's scripts, which travel inside
+  // this bundle - so an extension upgrade that changes one has to reach the App before anything
+  // is made from it. This used to sit after the early return below, which meant an existing
+  // workspace kept whatever scripts it was born with: a fix shipped here never arrived, and the
+  // only way to get it was to delete the installation by hand.
+  await ensureWorkspaceApp(store);
+
   const existing = await store.dispatch('management/find', { type: APP_INSTANCE_TYPE, id: name })
     .catch(() => null);
 
   if (existing) {
     return name;
   }
-
-  await ensureWorkspaceApp(store);
 
   const instance = await store.dispatch('management/create', {
     type:     APP_INSTANCE_TYPE,

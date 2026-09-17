@@ -26,7 +26,7 @@ import { severityRank } from '../lib/ledger';
 import { credentialsReady, readCredentialStatus } from '../lib/credentials';
 import type { CredentialStatus } from '../lib/credentials';
 import { startAction, stopRun } from '../lib/run';
-import { appsPlusInstalled } from '../lib/workspace';
+import { appsPlusInstalled, ensureWorkspaceApp } from '../lib/workspace';
 import { agentsStatus, whenAgentsReady } from '../lib/agents';
 import type { AgentsStatus } from '../lib/agents';
 import { refreshSnapshot } from '../lib/gather';
@@ -237,6 +237,14 @@ whenAgentsReady().then(async() => {
 
   agents.value = status;
   credentials.value = creds;
+
+  // Bring the workspace App up to date with this bundle. It describes what a fix workspace is,
+  // and apps-plus redeploys the installations of an App when it changes - so a script fixed in
+  // an extension upgrade reaches every running workspace simply by somebody opening the board.
+  // Quiet on failure: a reader without the rights to write an App should still see the board.
+  if (appsPlusInstalled(store)) {
+    ensureWorkspaceApp(store).catch(() => undefined);
+  }
 });
 </script>
 
