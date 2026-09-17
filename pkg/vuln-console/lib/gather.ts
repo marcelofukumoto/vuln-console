@@ -12,7 +12,7 @@ import { agentsApi } from './agents';
 import { podRunScript, podWriteFile, shellQuote } from './exec';
 import type { PodRef } from './exec';
 import { SEED_FILES } from '../seed.generated';
-import { tokenKey } from './credentials';
+import { GH_TOKEN_KEY } from './credentials';
 import type { Board } from '../config/constants';
 
 const ROOT = '/workspace/.vuln-console';
@@ -21,7 +21,7 @@ const POD_USER = '1000:1000';
 /** How long a gather may take. Two GitHub endpoints and a thousand alerts, so not instant. */
 const GATHER_TIMEOUT_MS = 180000;
 
-export async function refreshSnapshot(board: Board, principalId: string): Promise<void> {
+export async function refreshSnapshot(board: Board): Promise<void> {
   const api = agentsApi();
 
   if (!api) {
@@ -71,7 +71,7 @@ export async function refreshSnapshot(board: Board, principalId: string): Promis
       shellQuote(dir),
       shellQuote(board.id),
       shellQuote(board.repo),
-      shellQuote(tokenKey(principalId)),
+      shellQuote(GH_TOKEN_KEY),
       shellQuote(JSON.stringify(board.rancherPackages || [])),
     ].join(' '),
     `gather the Dependabot alerts for ${ board.repo }`,

@@ -23,7 +23,7 @@ import AgentSessionPanel from '../components/AgentSessionPanel.vue';
 import CredentialsDialog from '../components/CredentialsDialog.vue';
 import ShippedDrawer from '../components/ShippedDrawer.vue';
 import { severityRank } from '../lib/ledger';
-import { credentialsReady, readCredentialStatus } from '../lib/credentials';
+import { credentialsReady, isAdminUser, readCredentialStatus } from '../lib/credentials';
 import type { CredentialStatus } from '../lib/credentials';
 import { startAction, stopRun } from '../lib/run';
 import { appsPlusInstalled, ensureWorkspaceApp } from '../lib/workspace';
@@ -38,7 +38,20 @@ const store = useStore();
 const agents = ref<AgentsStatus>({
   state: 'checking', version: null, pod: null, detail: '',
 });
-const credentials = ref<CredentialStatus>({ stored: false, others: 0, unreadable: false });
+const credentials = ref<CredentialStatus>({ stored: false, unreadable: false });
+
+/**
+ * Only the `admin` user may change the credential.
+ *
+ * Asked once, of Rancher, and false until it answers - a gate that defaults open is not a gate.
+ * It hides the dialog; it does not hide the Secret, which any cluster owner can read through
+ * the API whatever this page draws. See lib/credentials.ts.
+ */
+const isAdmin = ref(false);
+
+isAdminUser().then((yes) => {
+  isAdmin.value = yes;
+}).catch(() => undefined);
 
 /**
  * Who is looking at this, as Rancher knows them.
@@ -118,14 +131,14 @@ function openShipped(rows: VulnGroup[]): void {
 function manageCredentials(): void {
   blockingCredentials.value = false;
   askingForToken.value = true;
-  readCredentialStatus(principalId.value).then((status) => {
+  readCredentialStatus().then((status) => {
     credentials.value = status;
   }).catch(() => undefined);
 }
 
 /** After the dialog saved: pick up the new state, and carry on if it was in the way of a run. */
 async function credentialsSaved(): Promise<void> {
-  credentials.value = await readCredentialStatus(principalId.value).catch(() => credentials.value);
+  credentials.value = await readCredentialStatus().catch(() => credentials.value);
 
   if (!blockingCredentials.value) {
     askingForToken.value = false;
@@ -148,7 +161,7 @@ async function refresh(): Promise<void> {
   error.value = '';
 
   try {
-    await refreshSnapshot(board.value, principalId.value);
+    await refreshSnapshot(board.value);
     await reload();
   } catch (e: any) {
     error.value = e?.message || String(e);
@@ -232,7 +245,7 @@ async function stop(job: Job | null): Promise<void> {
 whenAgentsReady().then(async() => {
   const [status, creds] = await Promise.all([
     agentsStatus(),
-    readCredentialStatus(principalId.value).catch(() => ({ stored: false, others: 0, unreadable: true })),
+    readCredentialStatus().catch(() => ({ stored: false, unreadable: true })),
   ]);
 
   agents.value = status;
@@ -285,11 +298,17 @@ whenAgentsReady().then(async() => {
           <i class="icon icon-refresh" />
           <span>{{ refreshing ? 'Refreshing…' : 'Refresh' }}</span>
         </button>
+        <!--
+          Only the `admin` user sets the credential, so only they are shown the way in. Hidden
+          rather than disabled: a disabled button invites everyone else to ask why, and the
+          answer - "somebody else manages this" - is better said by its absence.
+        -->
         <button
+          v-if="isAdmin"
           type="button"
           class="btn role-secondary"
           data-testid="vc-credentials-open"
-          title="The GitHub token the boards are read and fixed with"
+          title="The GitHub token every board is read and fixed with"
           @click="manageCredentials"
         >
           <i class="icon icon-key" />
@@ -357,7 +376,6 @@ whenAgentsReady().then(async() => {
     <CredentialsDialog
       v-if="askingForToken"
       :status="credentials"
-      :principal-id="principalId"
       :blocking="blockingCredentials"
       @cancel="askingForToken = false"
       @saved="credentialsSaved"

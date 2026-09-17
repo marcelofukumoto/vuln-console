@@ -28,13 +28,12 @@ RANCHER_TOKEN_KEY=${7:-}
 RANCHER_URL=${8:-}
 # This person's OWN GitHub browser, spawned from the Credentials dialog. Empty when they have
 # not set one up, which is allowed: the recording is still made, it is just attached by hand.
-GH_BROWSER_CDP=${9:-}
 # So each step can name itself on the job, and the board can say what it is waiting for rather
 # than showing "Running" through five minutes of clone and install.
 BOARD=${5:-}
 LIBRARY=${6:-}
 
-SECRET_NS=vuln-console
+SECRET_NS=ui-internal-tools
 SECRET=settings
 WS=/workspaces/$NS
 
@@ -191,7 +190,7 @@ fi
 # The browser tool comes in from the ConfigMap the pod already mounts - it is 1488 lines, which
 # is not something to put on a command line. Same read-only-mode trap as the vue config: the
 # mount is 0555, so `cp` produces a file the next run cannot overwrite.
-for tool in browser.mjs record.mjs rancher-login.mjs wait-for-sidecars gh-attach.mjs; do
+for tool in browser.mjs record.mjs rancher-login.mjs wait-for-sidecars; do
   rm -f "$WS/bin/$tool"
   cp "/workspace-config/$tool" "$WS/bin/$tool"
   chmod 755 "$WS/bin/$tool"
@@ -221,10 +220,10 @@ fi
 PREVIEW=''
 [ -n "$RANCHER_URL" ] && [ -n "$DEV_PROXY_PATH" ] && PREVIEW="${RANCHER_URL}${DEV_PROXY_PATH}"
 
-printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nRECORD_CDP=%s\nNODE_PATH=%s\nRANCHER_TOKEN=%s\nRANCHER_URL=%s\nAPI=%s\nGITHUB_BROWSER_CDP=%s\nVULN_PREVIEW_URL=%s\n' \
+printf 'GH_TOKEN=%s\nGITHUB_TOKEN=%s\nVULN_FORK=%s\nVULN_REPO=%s\nCLAUDE_BROWSER_CDP=%s\nRECORD_CDP=%s\nNODE_PATH=%s\nRANCHER_TOKEN=%s\nRANCHER_URL=%s\nAPI=%s\nVULN_PREVIEW_URL=%s\n' \
   "$TOKEN" "$TOKEN" "$FORK" "$REPO" "${VULN_BROWSER_CDP:-http://localhost:9222}" \
   "${VULN_BROWSER_CDP:-http://localhost:9222}" "$WS/node_modules" \
-  "$RANCHER_TOKEN" "$RANCHER_URL" "$RANCHER_URL" "$GH_BROWSER_CDP" "$PREVIEW" > "$WS/.env"
+  "$RANCHER_TOKEN" "$RANCHER_URL" "$RANCHER_URL" "$PREVIEW" > "$WS/.env"
 chmod 600 "$WS/.env"
 
 # Prove the browser works too, for the same reason: a recording that cannot be made is worth
@@ -257,7 +256,7 @@ stage preparing
 printf '%s' "$GH_TOKEN" | kube exec -i -n "$NS" "deploy/$NS" -c workspace -- \
   setpriv --reuid=1000 --regid=1000 --init-groups \
   /usr/bin/env HOME="$WS/.home" WS="$WS" FORK="$FORK" REPO="$REPO" \
-  RANCHER_TOKEN="$RANCHER_TOKEN" RANCHER_URL="${RANCHER_URL:-}" GH_BROWSER_CDP="$GH_BROWSER_CDP" \
+  RANCHER_TOKEN="$RANCHER_TOKEN" RANCHER_URL="${RANCHER_URL:-}" \
   DEV_PROXY_PATH="$(kube get deployment "$NS" -n "$NS" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="DEV_PROXY_PATH")].value}' 2>/dev/null)" \
   /bin/sh "$WS/.vc-setup.sh"
 

@@ -5,8 +5,17 @@
 // `pvc.yaml` drifted away from the `emptyDir` the Deployment actually mounted. A constant that
 // is read from one place cannot drift from itself.
 
-/** Where this extension keeps its own state. Created on first use. */
+/** Where this extension keeps its own state - snapshots, job records. Created on first use. */
 export const NAMESPACE = 'vuln-console';
+
+/**
+ * Where the SETTINGS live, shared by every console in this family.
+ *
+ * One namespace rather than one per extension. The credential is the same GitHub token whoever
+ * is using whichever board, and keeping a copy per extension meant the same secret pasted
+ * twice, expiring at different times, with two dialogs disagreeing about whether it was set.
+ */
+export const SETTINGS_NAMESPACE = 'ui-internal-tools';
 
 /**
  * One board: a repository whose Dependabot alerts are shown, and the fork its fixes go to.
@@ -147,19 +156,22 @@ export function devSchemeFor(board: Board): 'http' | 'https' {
  *
  * One Secret, one key per Rancher user (`gh_token-<principal>`), because a fix is done BY
  * somebody: it pushes to their fork and opens the pull request as them. Extension Studio's
- * single shared `gh_token` is deliberately NOT used — its own code calls it "a token written by
- * anybody", which would make every fix in the cluster the work of one anonymous account.
+ * One credential for the installation, not one per person.
+ *
+ * It was per user, so a fix pushed to the pusher's own fork and was authored by them. That is
+ * still the nicer shape, and it is not what is wanted here: the token is now set by the `admin`
+ * user alone and everybody's runs use it, so every fix is the work of whatever account it
+ * belongs to. Said plainly because it is a real trade - attribution for one place to manage.
  */
 export const SECRET_NAME = 'settings';
 export const GH_TOKEN_KEY = 'gh_token';
 
 /**
- * The Rancher token key, also per user.
+ * The Rancher token key.
  *
  * A fix is verified by driving a browser at the dev server, and that server proxies Rancher's
- * API to the real cluster - so without a session the browser photographs a login page. Rancher's
- * session IS a cookie carrying a token, so the token is the login. Minted as the person looking
- * at the board, so what the screenshots show is what THEY can see.
+ * API to the real cluster - so without a session the browser photographs a login page. Minted
+ * by the admin when they set the credentials, and used by every run.
  */
 export const RANCHER_TOKEN_KEY = 'rancher_token';
 
@@ -176,8 +188,8 @@ export const JOB_PREFIX = 'job-';
 /** The apps-plus App that describes a fix workspace, and the instances made from it. */
 export const WORKSPACE_APP = 'vuln-workspace';
 export const WORKSPACE_PORT = 8005;
+/** The Chromium sidecar in a fix workspace. Not a browser of anybody's own - see below. */
 export const BROWSER_PORT = 3000;
-export const BROWSER_CDP_PORT = 9222;
 
 /** Where a workspace's checkout lives, on both sides of the exec tunnel. */
 export const WORKSPACES_ROOT = '/workspaces';

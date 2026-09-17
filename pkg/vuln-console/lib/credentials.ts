@@ -1,17 +1,17 @@
-// The GitHub token, stored per Rancher user.
+// The GitHub token, stored once for the installation and set by the `admin` user alone.
 //
-// Per user, not per installation, and that is the whole point of this file. A fix pushes a
-// branch and opens a pull request, and both of those are done BY somebody: with one shared token
-// every fix in the cluster is attributed to whoever pasted it, pushes to that person's fork, and
-// asks for review as them. Each person brings their own, and their own fork and authorship
-// follow from it.
+// It used to be per Rancher user, so a fix pushed to the pusher's own fork and carried their
+// authorship. This is the other trade: one credential, one place to manage it, and every fix
+// the work of whichever account it belongs to. Whoever presses Fix, the run uses this token.
 //
-// It is NOT shared with Extension Studio, which was the first design here. That extension keeps
-// one `gh_token` for the whole installation - its own code calls it "a token written by
-// anybody" - so borrowing it would mean everybody acting as one anonymous account, which is the
-// thing this is avoiding. The two are different credentials with the same name.
+// WHO CAN CHANGE IT. The console offers the dialog only to the user whose Rancher username is
+// `admin`. That is a UI gate and it is worth being exact about what it is not: a Secret is
+// readable by anyone with RBAC `get` on secrets in its namespace, and a cluster owner has that
+// implicitly and can grant it to themselves regardless. So this keeps other people from
+// CHANGING the credential through the console; it does not hide it from another administrator.
+// Keeping non-admins out altogether is RBAC's job, on the namespace.
 //
-// The handling is still Extension Studio's, because that part was right:
+// The handling is Extension Studio's, because that part was right:
 //
 //   - **Write-only from the browser.** A credential goes in and never comes back out. Nothing
 //     here ever fetches a Secret's `data`.
@@ -22,8 +22,8 @@
 //     It has to be the raw apiserver path, because Steve answers in its own shape and ignores
 //     the header.
 //   - **Merge patches.** A read-modify-PUT would have to fetch the object to preserve the keys
-//     it is not touching - which with one key per user means pulling everybody's token into one
-//     person's browser. A patch says what changed; `null` deletes a key.
+//     it is not touching, which means pulling the credential into a browser to write beside it.
+//     A patch says what changed; `null` deletes a key.
 //   - **An annotation says whether one is stored**, so the form can choose between "Set" and
 //     "Replace" without going near `data`.
 //
@@ -31,52 +31,27 @@
 // needed. It is never sent from here into a pod.
 import { K8S_BASE, STEVE_BASE, rancherFetch } from './rancher';
 import {
-  GH_TOKEN_KEY, NAMESPACE, RANCHER_TOKEN_KEY, RANCHER_TOKEN_TTL_MS, SECRET_NAME,
+  GH_TOKEN_KEY, RANCHER_TOKEN_KEY, RANCHER_TOKEN_TTL_MS, SECRET_NAME, SETTINGS_NAMESPACE,
 } from '../config/constants';
 
-export { GH_TOKEN_KEY, NAMESPACE, RANCHER_TOKEN_KEY, SECRET_NAME };
+export {
+  GH_TOKEN_KEY, RANCHER_TOKEN_KEY, SECRET_NAME, SETTINGS_NAMESPACE,
+};
 
 /**
- * A Rancher principal as a Secret key.
+ * Is the person looking at this the `admin` user?
  *
- * `local://user-qncms` becomes `local-user-qncms`. The principal id is what the dashboard
- * actually has - it is on every page, it is stable, and it distinguishes a local user from the
- * same login arriving through GitHub, which two people sharing a name would not.
+ * By username, asked of Rancher, rather than by principal id - an id is per installation and
+ * hard-coding one makes an extension that only works on the cluster it was written on. Norman's
+ * `?me=true` answers for the caller, so there is nothing to pass in and nothing to spoof from
+ * here: the session doing the asking is the session being described.
  *
- * Secret data keys allow only `[-._a-zA-Z0-9]`, so everything else collapses to a hyphen.
+ * Failure is NOT admin. A check that cannot be made is not a check that passed.
  */
-export function userSlug(principalId: string): string {
-  return String(principalId || '')
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 200) || 'unknown';
-}
+export async function isAdminUser(): Promise<boolean> {
+  const me = await rancherFetch(`${ STEVE_BASE.replace('/v1', '') }/v3/users?me=true`).catch(() => null);
 
-/**
- * The same principal as an object NAME.
- *
- * `userSlug` is shaped for Secret data keys, which allow `_`, `.` and capitals; a resource name
- * is DNS-1123 and allows none of them. `github_user://4140586` is a real principal on this
- * Rancher and its underscore is what the apiserver rejects, so a name gets its own narrower
- * spelling rather than the key one. For principals that contain neither - `local://user-qncms` -
- * the two agree, which is why the difference went unnoticed until a GitHub login pressed Setup.
- */
-export function userDnsSlug(principalId: string): string {
-  return String(principalId || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 200) || 'unknown';
-}
-
-/** The Secret key holding one user's GitHub token. */
-export function tokenKey(principalId: string): string {
-  return `${ GH_TOKEN_KEY }-${ userSlug(principalId) }`;
-}
-
-/** The Secret key holding one user's Rancher token. */
-export function rancherTokenKey(principalId: string): string {
-  return `${ RANCHER_TOKEN_KEY }-${ userSlug(principalId) }`;
+  return (me?.data || []).some((u: any) => u?.username === 'admin');
 }
 
 /**
@@ -91,7 +66,7 @@ export function rancherTokenKey(principalId: string): string {
  * different Rancher than the one this tab is open on, and each of those is a browser that
  * silently photographs a login page. Minting costs one request and the TTL clears them up.
  */
-export async function mintRancherToken(principalId: string, description: string): Promise<void> {
+export async function mintRancherToken(description: string): Promise<void> {
   const minted = await rancherFetch(`${ STEVE_BASE.replace('/v1', '') }/v3/tokens`, {
     method: 'POST',
     body:   JSON.stringify({
@@ -112,14 +87,11 @@ export async function mintRancherToken(principalId: string, description: string)
   await rancherFetch(secretPath(), {
     method:  'PATCH',
     headers: { 'Content-Type': 'application/merge-patch+json', ...METADATA_ONLY },
-    body:    JSON.stringify({ data: { [rancherTokenKey(principalId)]: encodeSecret(token) } }),
+    body:    JSON.stringify({ data: { [RANCHER_TOKEN_KEY]: encodeSecret(token) } }),
   });
 }
 
-function annotationKey(principalId: string): string {
-  // Kubernetes allows 63 characters after the slash; a principal slug is well inside it.
-  return `vuln-console.rancher.io/gh-${ userSlug(principalId) }`.slice(0, 253);
-}
+const GH_ANNOTATION = 'vuln-console.rancher.io/gh';
 
 /**
  * Ask for metadata and nothing else.
@@ -130,7 +102,7 @@ function annotationKey(principalId: string): string {
 const METADATA_ONLY = { Accept: 'application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1' };
 
 function secretPath(): string {
-  return `${ K8S_BASE }/namespaces/${ NAMESPACE }/secrets/${ SECRET_NAME }`;
+  return `${ K8S_BASE }/namespaces/${ SETTINGS_NAMESPACE }/secrets/${ SECRET_NAME }`;
 }
 
 async function secretMetadata(): Promise<any | null> {
@@ -161,39 +133,28 @@ function managedDataKeys(metadata: any): string[] {
 }
 
 export interface CredentialStatus {
-  /** Whether THIS user has stored a token. Nobody else's presence helps them. */
+  /** Whether a token is stored for the installation. */
   stored: boolean;
-  /** How many people have stored one, which is worth saying on a shared board. */
-  others: number;
   /** True when the namespace or Secret could not be read at all - permissions, not absence. */
   unreadable: boolean;
 }
 
-export async function readCredentialStatus(principalId: string): Promise<CredentialStatus> {
+export async function readCredentialStatus(): Promise<CredentialStatus> {
   const metadata = await secretMetadata();
 
   if (!metadata) {
-    return { stored: false, others: 0, unreadable: false };
+    return { stored: false, unreadable: false };
   }
 
   const keys = managedDataKeys(metadata);
   const annotations = metadata.annotations || {};
-  const mine = annotations[annotationKey(principalId)] === 'set' || keys.includes(tokenKey(principalId));
-  const everyone = new Set([
-    ...keys.filter((key) => key.startsWith(`${ GH_TOKEN_KEY }-`)),
-    ...Object.keys(annotations)
-      .filter((key) => key.startsWith('vuln-console.rancher.io/gh-'))
-      .map((key) => `${ GH_TOKEN_KEY }-${ key.split('/')[1].replace(/^gh-/, '') }`),
-  ]);
 
   return {
-    stored:     mine,
-    others:     Math.max(0, everyone.size - (mine ? 1 : 0)),
+    stored:     annotations[GH_ANNOTATION] === 'set' || keys.includes(GH_TOKEN_KEY),
     unreadable: false,
   };
 }
 
-/** The namespace and an empty Secret, made on the way past so the patch below has a target. */
 async function ensureSecret(): Promise<void> {
   const existing = await secretMetadata();
 
@@ -203,21 +164,21 @@ async function ensureSecret(): Promise<void> {
 
   await rancherFetch(`${ K8S_BASE }/namespaces`, {
     method: 'POST',
-    body:   JSON.stringify({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: NAMESPACE } }),
+    body:   JSON.stringify({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: SETTINGS_NAMESPACE } }),
   }).catch((e: any) => {
     if (!/409|already exists|alreadyexists/i.test(e?.message || '')) {
       throw e;
     }
   });
 
-  await rancherFetch(`${ K8S_BASE }/namespaces/${ NAMESPACE }/secrets`, {
+  await rancherFetch(`${ K8S_BASE }/namespaces/${ SETTINGS_NAMESPACE }/secrets`, {
     method:  'POST',
     headers: METADATA_ONLY,
     body:    JSON.stringify({
       apiVersion: 'v1',
       kind:       'Secret',
       type:       'Opaque',
-      metadata:   { name: SECRET_NAME, namespace: NAMESPACE },
+      metadata:   { name: SECRET_NAME, namespace: SETTINGS_NAMESPACE },
     }),
   }).catch((e: any) => {
     if (!/409|already exists|alreadyexists/i.test(e?.message || '')) {
@@ -253,7 +214,7 @@ export interface CredentialChanges {
  * Same shape as the report console's, which never had the bug, so the two dialogs behave the
  * same way for the same reason.
  */
-export async function saveCredentials(principalId: string, changes: CredentialChanges): Promise<void> {
+export async function saveCredentials(changes: CredentialChanges): Promise<void> {
   if (changes.ghToken === undefined) {
     return;
   }
@@ -266,8 +227,8 @@ export async function saveCredentials(principalId: string, changes: CredentialCh
     method:  'PATCH',
     headers: { 'Content-Type': 'application/merge-patch+json', ...METADATA_ONLY },
     body:    JSON.stringify({
-      metadata: { annotations: { [annotationKey(principalId)]: clearing ? null : 'set' } },
-      data:     { [tokenKey(principalId)]: clearing ? null : encodeSecret(changes.ghToken) },
+      metadata: { annotations: { [GH_ANNOTATION]: clearing ? null : 'set' } },
+      data:     { [GH_TOKEN_KEY]: clearing ? null : encodeSecret(changes.ghToken) },
     }),
   });
 }

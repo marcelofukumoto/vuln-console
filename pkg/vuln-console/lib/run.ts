@@ -24,8 +24,7 @@ import { agentProject, agentsApi } from './agents';
 import { podExec, podRunScript, podWriteFile, shellQuote } from './exec';
 import type { PodRef } from './exec';
 import { readJobs, writeJob } from './store';
-import { mintRancherToken, rancherTokenKey, tokenKey } from './credentials';
-import { ghBrowserCdp, ghBrowserStatus } from './gh-browser';
+import { GH_TOKEN_KEY, RANCHER_TOKEN_KEY, mintRancherToken } from './credentials';
 import { ensureWorkspace, workspaceName, workspaceUrl } from './workspace';
 import type { Store } from './workspace';
 import { SEED_FILES } from '../seed.generated';
@@ -59,7 +58,6 @@ const PROMPTS: Record<JobAction, string> = {
   fix:             'fix.prompt.md',
   pr:              'pr.prompt.md',
   record:          'record.prompt.md',
-  publish:         'publish.prompt.md',
   addresscomment:  'address-comments.prompt.md',
   resolveconflict: 'resolve-conflict.prompt.md',
 };
@@ -68,7 +66,6 @@ const VERBS: Record<JobAction, string> = {
   fix:             'Fix',
   pr:              'Open the pull request for',
   record:          'Record the verification for',
-  publish:         'Attach the recording for',
   addresscomment:  'Address the review comments on',
   resolveconflict: 'Rebase',
 };
@@ -226,8 +223,13 @@ export interface StartOptions {
   board: Board;
   /** The account the stored token belongs to, from the gather. Decides the fork. */
   tokenLogin: string;
-  /** Who pressed the button, as Rancher knows them. Decides whose token is used. */
-  principalId: string;
+  /**
+   * Who pressed the button, as Rancher knows them - recorded on the job as `by`.
+   *
+   * It no longer decides WHICH token is used: there is one for the installation now. Kept
+   * because "who started this" is still worth knowing on a shared board.
+   */
+  principalId?: string;
   library: string;
   action: JobAction;
   group?: VulnGroup | null;
@@ -244,7 +246,7 @@ export interface StartOptions {
  * be fixed at once; two runs on ONE library still cannot.
  */
 export async function startAction(options: StartOptions): Promise<Job> {
-  const { store, board, tokenLogin, principalId, library, action, group = null, by } = options;
+  const { store, board, tokenLogin, library, action, group = null, by } = options;
   const fork = forkFor(board, tokenLogin);
   const prTarget = prTargetFor(board);
 
@@ -334,18 +336,15 @@ export async function startAction(options: StartOptions): Promise<Job> {
     // than thrown, because the caller has already been answered.
     void (async() => {
       try {
-        // A Rancher token for this person, so the browser in the workspace is signed in AS them.
-        // Without it the verification drives a browser with no session and photographs a login
-        // page, which looks like evidence and is not. Not fatal - a fix that cannot be shown is
-        // still a fix - so a failure here is swallowed and the setup reports which it got.
-        await mintRancherToken(principalId, `vuln-console ${ board.id } ${ library }`)
-          .catch(() => undefined);
-
-        // Only when it is actually up: a CDP endpoint for a browser that is not running is
-        // worse than none, because the uploader would wait on it rather than saying there is
-        // nothing to upload with.
-        const browserState = await ghBrowserStatus(principalId).catch(() => null);
-        const ghBrowser = browserState?.state === 'ready' ? ghBrowserCdp(principalId) : '';
+        // A Rancher session for the workspace browser. Without it the verification drives a
+        // browser with no session and photographs a login page, which looks like evidence and
+        // is not. Not fatal - a fix that cannot be shown is still a fix - so a failure here is
+        // swallowed and the setup reports which it got.
+        //
+        // Minted by whoever pressed the button, which is no longer the same account the fix is
+        // pushed as: the GitHub token is the installation's. So the screenshots show what the
+        // person looking can see, and the branch belongs to the shared account.
+        await mintRancherToken(`vuln-console ${ board.id } ${ library }`).catch(() => undefined);
 
         await podRunScript(
           target,
@@ -354,15 +353,11 @@ export async function startAction(options: StartOptions): Promise<Job> {
             shellQuote(workspace),
             shellQuote(board.repo),
             shellQuote(fork),
-            shellQuote(tokenKey(principalId)),
+            shellQuote(GH_TOKEN_KEY),
             shellQuote(board.id),
             shellQuote(library),
-            shellQuote(rancherTokenKey(principalId)),
+            shellQuote(RANCHER_TOKEN_KEY),
             shellQuote(window.location.origin),
-            // This person's own GitHub browser, when they have set one up. Empty otherwise,
-            // which is allowed - the recording is still made and served, it is just attached to
-            // the pull request by hand.
-            shellQuote(ghBrowser),
           ].join(' '),
           `prepare the workspace for ${ board.repo }`,
           WORKSPACE_READY_MS,

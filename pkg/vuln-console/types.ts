@@ -160,7 +160,6 @@ export type JobAction =
   | 'fix'
   | 'pr'
   | 'record'
-  | 'publish'
   | 'addresscomment'
   | 'resolveconflict';
 

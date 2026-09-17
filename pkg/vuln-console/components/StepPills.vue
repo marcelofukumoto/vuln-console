@@ -173,9 +173,6 @@ const branchUrl = computed(() => (branch.value ? `https://github.com/${ props.fo
           >
             <RcStatusBadge status="success">Watch recording</RcStatusBadge>
           </a>
-          <RcButton v-if="pr" variant="secondary" size="small" :disabled="busy" @click="emit('act', 'publish')">
-            <span>Add it to the pull request</span>
-          </RcButton>
           <RcButton variant="link" size="small" :disabled="busy" @click="emit('act', 'record')">
             <span>Re-record</span>
           </RcButton>

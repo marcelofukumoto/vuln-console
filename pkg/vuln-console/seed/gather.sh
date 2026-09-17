@@ -26,6 +26,9 @@ SEED=$(dirname "$0")
 [ -d "$DIR" ] || { echo "gather.sh: no such directory: $DIR" >&2; exit 2; }
 
 NS=vuln-console
+# Settings live in one namespace shared by every console in this family, not beside each
+# extension's own data.
+SECRET_NS=ui-internal-tools
 SECRET=settings
 
 # kubectl as the pod rather than as whoever opened a terminal in it. shell.sh writes a kubeconfig
@@ -40,7 +43,7 @@ secret_key() {
   kube get secret "$2" -n "$1" -o "jsonpath={.data.$3}" 2>/dev/null | base64 -d 2>/dev/null | tr -d '\r\n'
 }
 
-GH_TOKEN=$(secret_key "$NS" "$SECRET" "$TOKEN_KEY")
+GH_TOKEN=$(secret_key "$SECRET_NS" "$SECRET" "$TOKEN_KEY")
 
 if [ -z "$GH_TOKEN" ]; then
   echo "gather.sh: no GitHub token is stored for this user. Set one from the Credentials dialog." >&2

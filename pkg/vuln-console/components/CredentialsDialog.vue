@@ -13,17 +13,14 @@
 // It is NOT shared with Extension Studio, which was the first design here: that extension keeps
 // one `gh_token` for the whole installation, so borrowing it would mean everybody acting as one
 // anonymous account - the thing per-user credentials exist to avoid.
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Banner } from '@components/Banner';
 import { saveCredentials } from '../lib/credentials';
 import type { CredentialStatus } from '../lib/credentials';
-import { ensureGhBrowser, ghBrowserStatus } from '../lib/gh-browser';
-import type { GhBrowserStatus } from '../lib/gh-browser';
 
 const props = defineProps<{
   status: CredentialStatus;
   /** Whose token this is. Stored per person, so the dialog is about yours and nobody else's. */
-  principalId: string;
   /** True when this opened because a run could not start without it. */
   blocking?: boolean;
   busy?: boolean;
@@ -37,40 +34,6 @@ const emit = defineEmits<{
 const github = ref('');
 const showGithub = ref(false);
 
-/**
- * The person's own GitHub browser, which is how a recording gets onto a pull request.
- *
- * Optional on purpose: without one everything works except the automatic attachment, and the
- * console says so rather than failing. Nothing about it is stored - the session lives in that
- * browser's profile - so setting it up is spawning it and signing in, and nothing else.
- */
-const browser = ref<GhBrowserStatus>({ state: 'absent', url: '' });
-const spawning = ref(false);
-
-async function refreshBrowser() {
-  browser.value = await ghBrowserStatus(props.principalId).catch(() => browser.value);
-}
-
-async function setUpBrowser() {
-  spawning.value = true;
-  error.value = '';
-
-  try {
-    browser.value = await ensureGhBrowser(props.principalId);
-
-    // It takes a little while to answer; poll rather than making somebody reopen the dialog.
-    for (let i = 0; i < 40 && browser.value.state !== 'ready'; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      await refreshBrowser();
-    }
-  } catch (e: any) {
-    error.value = e?.message || String(e);
-  } finally {
-    spawning.value = false;
-  }
-}
-
-onMounted(refreshBrowser);
 const saving = ref(false);
 const error = ref('');
 
@@ -90,7 +53,7 @@ async function save() {
   try {
     // Only what was typed. A blank field means "I did not change this", so there is nothing
     // to write and the dialog just closes - it does not mean "remove what is stored".
-    await saveCredentials(props.principalId, {
+    await saveCredentials({
       ...(github.value.trim() ? { ghToken: github.value.trim() } : {}),
     });
     github.value = '';
@@ -107,7 +70,7 @@ async function clear() {
   error.value = '';
 
   try {
-    await saveCredentials(props.principalId, { ghToken: '' });
+    await saveCredentials({ ghToken: '' });
     emit('saved');
   } catch (e: any) {
     error.value = e?.message || String(e);
@@ -179,54 +142,12 @@ async function clear() {
         </button>
       </label>
 
-      <label class="creds__field">
-        <span class="creds__label">
-          GitHub browser
-          <span class="creds__state" :class="{ 'is-set': browser.state === 'ready' }">
-            {{ browser.state === 'ready' ? 'Running' : browser.state === 'starting' ? 'Starting…' : 'Not set up' }}
-          </span>
-        </span>
-        <span class="creds__hint">
-          Only needed to put a verification recording <em>on</em> a pull request. GitHub has no
-          API for that — it is a browser flow — so this spawns a browser of your own, you sign it
-          in to GitHub once, and uploads go through it as you. Nothing is stored: the session
-          lives in that browser.
-          <template v-if="browser.state === 'absent'">
-            Without one, recordings are still made — you attach them yourself.
-          </template>
-        </span>
-
-        <span class="creds__browser">
-          <button
-            v-if="browser.state === 'absent'"
-            type="button"
-            class="btn role-secondary"
-            :disabled="spawning"
-            data-testid="vc-spawn-browser"
-            @click.prevent="setUpBrowser"
-          >
-            {{ spawning ? 'Starting it…' : 'Set up my GitHub browser' }}
-          </button>
-          <template v-else>
-            <a
-              class="btn role-secondary"
-              :href="browser.url"
-              target="_blank"
-              rel="noopener"
-              data-testid="vc-open-browser"
-            >Open it and sign in to GitHub</a>
-            <span v-if="browser.state === 'starting'" class="creds__hint">
-              still starting — the link works once it is up
-            </span>
-          </template>
-        </span>
-      </label>
-
       <Banner color="info" class="creds__note">
-        Written straight into the Secret under a key of your own and never read back by this
-        page — replacing it is possible, seeing it is not. Saving touches your key alone, so
-        nobody else's token is read or rewritten. The pod reads it with its own ServiceAccount at
-        the moment it is needed.
+        One credential for the whole installation, in <code>ui-internal-tools</code>, shared
+        with the other consoles. Written straight into the Secret and never read back by this
+        page — replacing it is possible, seeing it is not. Every run uses it, whoever started
+        them, so a fix is the work of whichever account it belongs to. The pod reads it with its
+        own ServiceAccount at the moment it is needed.
       </Banner>
 
       <div class="creds__actions">
