@@ -96,10 +96,29 @@ const yTicks = computed(() => {
   return [0, step, step * 2, step * 3, step * 4].filter((v) => v <= peak.value * 1.15);
 });
 
-/** One label per year - 360 date labels would be a grey smear. */
-const xTicks = computed(() => dates.value
-  .map((d, i) => ({ d, i }))
-  .filter(({ d, i }, n, all) => i === 0 || d.slice(0, 4) !== all[n - 1].d.slice(0, 4)));
+/**
+ * Enough labels to place a point in time, never enough to smear.
+ *
+ * 360 dates would be grey mush, and a year of weekly buckets labelled only where the year
+ * turns is two labels - so the unit follows the window: quarters when it is short, years when
+ * it is long.
+ */
+const xTicks = computed(() => {
+  const short = dates.value.length <= 80;
+  const seen = new Set<string>();
+
+  return dates.value.map((d, i) => ({ d, i })).filter(({ d }) => {
+    const key = short ? `${ d.slice(0, 4) }-Q${ Math.floor(Number(d.slice(5, 7)) / 3.1) }` : d.slice(0, 4);
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+
+    return true;
+  }).map(({ d, i }) => ({ i, label: short ? `${ d.slice(0, 7) }` : d.slice(0, 4) }));
+});
 
 const totalAt = (i: number) => SEVERITIES.reduce((sum, s) => sum + (series.value?.[s][i] || 0), 0);
 const latest = computed(() => (dates.value.length ? totalAt(dates.value.length - 1) : 0));
@@ -161,8 +180,8 @@ const tableRows = computed(() => dates.value
           <line v-for="t in yTicks" :key="`g${ t }`" :x1="PAD.l" :x2="W - PAD.r" :y1="y(t)" :y2="y(t)" />
         </g>
         <g class="hist__axis">
-          <text v-for="t in yTicks" :key="`y${ t }`" :x="PAD.l - 6" :y="y(t) + 3">{{ t }}</text>
-          <text v-for="t in xTicks" :key="`x${ t.i }`" :x="x(t.i)" :y="H - 8">{{ t.d.slice(0, 4) }}</text>
+          <text v-for="t in yTicks" :key="`y${ t }`" class="is-y" :x="PAD.l - 6" :y="y(t) + 3">{{ t }}</text>
+          <text v-for="t in xTicks" :key="`x${ t.i }`" class="is-x" :x="x(t.i)" :y="H - 8">{{ t.label }}</text>
         </g>
 
         <!-- The stack. A 2px surface-coloured stroke is the gap between bands. -->
@@ -329,8 +348,13 @@ const tableRows = computed(() => dates.value
   fill: var(--muted);
 }
 
-.hist__axis text:first-of-type {
+/* Explicit, because `:first-of-type` anchored exactly one label and left the rest to collide. */
+.hist__axis .is-y {
   text-anchor: end;
+}
+
+.hist__axis .is-x {
+  text-anchor: middle;
 }
 
 .hist__band {
