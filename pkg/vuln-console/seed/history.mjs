@@ -131,6 +131,18 @@ if (dates[dates.length - 1] !== new Date().toISOString().slice(0, 10)) {
   dates.push(new Date().toISOString().slice(0, 10));
 }
 
+/**
+ * A bucket is measured at the END of its day, not the start.
+ *
+ * It decides whether an alert raised on the bucket's own date counts as open in it, and it
+ * makes a visible difference: rancher/dashboard had six medium alerts created on 2026-09-09
+ * and closed within a fortnight, which this counts in that bucket and a start-of-day reading
+ * does not. Every difference from the file this replaced is exactly that - the older builder
+ * measured at the start of the day.
+ *
+ * End-of-day is the better reading of "open on date D", and it means the newest bucket
+ * reflects everything up to now rather than lagging a day behind.
+ */
 const stamps = dates.map((d) => Date.parse(`${ d }T23:59:59Z`));
 const repos = {};
 
