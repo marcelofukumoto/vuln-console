@@ -32,6 +32,7 @@ import type { AgentsStatus } from '../lib/agents';
 import { refreshSnapshot } from '../lib/gather';
 import { ensureGatherCron } from '../lib/gather-cron';
 import { ensureNamespace } from '../lib/store';
+import HistoryPanel from '../components/HistoryPanel.vue';
 import { BOARDS, boardById } from '../config/constants';
 import type { Job, JobAction, VulnGroup } from '../types';
 
@@ -383,6 +384,19 @@ whenAgentsReady().then(async() => {
           @shipped="openShipped"
           @loaded="onLoaded"
         />
+      </Tab>
+
+      <!--
+        Not a board. The boards answer "what is actionable today"; this answers "are we
+        winning", which is a different question over a different span - so it is a tab beside
+        them rather than a panel inside one.
+      -->
+      <Tab
+        name="history"
+        label="Alerts over time"
+        :weight="0"
+      >
+        <HistoryPanel />
       </Tab>
     </Tabbed>
 

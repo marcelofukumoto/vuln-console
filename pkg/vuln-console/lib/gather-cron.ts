@@ -15,8 +15,11 @@ import { NAMESPACE, SECRET_NAME, SETTINGS_NAMESPACE } from '../config/constants'
 import type { Board } from '../config/constants';
 import { STEVE_BASE, rancherFetch } from './rancher';
 import { SEED_FILES } from '../seed.generated';
+import { TRACKED_REPOS } from '../config/repos';
 
 const NAME = 'vuln-gather';
+/** The history rebuild is its own job on its own clock - see HISTORY_SCHEDULE. */
+const HISTORY_NAME = 'vuln-history';
 
 /**
  * Every half hour.
@@ -26,6 +29,15 @@ const NAME = 'vuln-gather';
  * more that matters - the work is the same handful of API calls either way.
  */
 const SCHEDULE = '*/30 * * * *';
+
+/**
+ * Daily, at a quiet hour.
+ *
+ * The series is bucketed by WEEK, so running it more often redraws the same picture while
+ * spending a full alert pull on every repository - about forty API calls - on a number that
+ * cannot have moved. Half past three because nothing else here runs then.
+ */
+const HISTORY_SCHEDULE = '30 3 * * *';
 
 /** A stock node image. The job needs no kubectl: it talks to the apiserver itself. */
 const IMAGE = 'node:24-alpine';
@@ -127,7 +139,7 @@ function rbac(): { type: string; name: string; namespace: string; body: Record<s
 function scriptsBody(): Record<string, unknown> {
   const data: Record<string, string> = {};
 
-  for (const name of ['gather.mjs', 'cron-gather.mjs']) {
+  for (const name of ['gather.mjs', 'cron-gather.mjs', 'history.mjs', 'cron-history.mjs']) {
     const content = SEED_FILES[name];
 
     if (!content) {
@@ -203,6 +215,57 @@ function cronBody(boards: Board[]): Record<string, unknown> {
 }
 
 /**
+ * The history rebuild: same pod shape, same ServiceAccount, its own clock.
+ *
+ * It needs exactly what the gather needs - read one Secret, write one ConfigMap - so it borrows
+ * the RBAC rather than growing a second copy of it.
+ */
+function historyCronBody(): Record<string, unknown> {
+  return {
+    apiVersion: 'batch/v1',
+    kind:       'CronJob',
+    metadata:   { name: HISTORY_NAME, namespace: NAMESPACE },
+    spec:       {
+      schedule:                   HISTORY_SCHEDULE,
+      concurrencyPolicy:          'Forbid',
+      startingDeadlineSeconds:    3600,
+      successfulJobsHistoryLimit: 1,
+      failedJobsHistoryLimit:     3,
+      jobTemplate:                {
+        spec: {
+          backoffLimit: 1,
+          template:     {
+            spec: {
+              serviceAccountName: NAME,
+              restartPolicy:      'Never',
+              securityContext:    {
+                runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: { type: 'RuntimeDefault' },
+              },
+              containers: [{
+                name:    'history',
+                image:   IMAGE,
+                command: ['node', '/seed/cron-history.mjs'],
+                env:     [
+                  { name: 'VULN_NAMESPACE', value: NAMESPACE },
+                  { name: 'SETTINGS_NAMESPACE', value: SETTINGS_NAMESPACE },
+                  { name: 'SETTINGS_SECRET', value: SECRET_NAME },
+                  { name: 'NODE_EXTRA_CA_CERTS', value: '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt' },
+                  { name: 'REPOS', value: JSON.stringify(TRACKED_REPOS) },
+                ],
+                securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ['ALL'] } },
+                volumeMounts:    [{ name: 'seed', mountPath: '/seed' }],
+                resources:       { requests: { cpu: '50m', memory: '128Mi' }, limits: { memory: '512Mi' } },
+              }],
+              volumes: [{ name: 'seed', configMap: { name: `${ NAME }-scripts` } }],
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+/**
  * Put the schedule in place, and keep it matching this build.
  *
  * Called on board mount. The CronJob carries the board list and the scripts, so an extension
@@ -216,4 +279,5 @@ export async function ensureGatherCron(boards: Board[]): Promise<void> {
 
   await apply('configmap', `${ NAME }-scripts`, scriptsBody());
   await apply('batch.cronjob', NAME, cronBody(boards));
+  await apply('batch.cronjob', HISTORY_NAME, historyCronBody());
 }
