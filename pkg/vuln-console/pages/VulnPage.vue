@@ -68,6 +68,14 @@ const refreshing = ref(false);
 const askingForToken = ref(false);
 const blockingCredentials = ref(false);
 const activeBoard = ref(BOARDS[0].id);
+/**
+ * Which half of the console is showing.
+ *
+ * A toggle rather than a tab beside the boards: the boards are three views of one job - fix
+ * what is actionable - and the history is a different question about the same estate. Sitting
+ * it in the tab strip made it look like a fourth board.
+ */
+const showing = ref<'boards' | 'history'>('boards');
 
 /** What each board last reported, so the header's actions can act on the visible one. */
 const boardRows = ref<Record<string, VulnGroup[]>>({});
@@ -290,7 +298,34 @@ whenAgentsReady().then(async() => {
       </div>
 
       <div class="vuln__actions">
+        <div class="vuln__switch" role="tablist" aria-label="What to show">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="showing === 'boards'"
+            :class="['vuln__switch-btn', { 'is-on': showing === 'boards' }]"
+            data-testid="vc-show-boards"
+            @click="showing = 'boards'"
+          >
+            <i class="icon icon-list-flat" />
+            <span>Act on it</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="showing === 'history'"
+            :class="['vuln__switch-btn', { 'is-on': showing === 'history' }]"
+            data-testid="vc-show-history"
+            title="Open Dependabot alerts over time, across every repository the team owns"
+            @click="showing = 'history'"
+          >
+            <i class="icon icon-chart" />
+            <span>Over time</span>
+          </button>
+        </div>
+
         <button
+          v-if="showing === 'boards'"
           type="button"
           class="btn role-primary"
           :disabled="agents.state !== 'ready' || !appsPlusInstalled(store)"
@@ -302,6 +337,7 @@ whenAgentsReady().then(async() => {
           <span>Fix the worst one</span>
         </button>
         <button
+          v-if="showing === 'boards'"
           type="button"
           class="btn role-secondary"
           :disabled="!ready || refreshing"
@@ -363,7 +399,10 @@ whenAgentsReady().then(async() => {
       {{ error }}
     </Banner>
 
+    <HistoryPanel v-if="showing === 'history'" />
+
     <Tabbed
+      v-else
       :default-tab="BOARDS[0].id"
       :use-hash="true"
       @changed="activeBoard = $event.selectedName"
@@ -386,18 +425,6 @@ whenAgentsReady().then(async() => {
         />
       </Tab>
 
-      <!--
-        Not a board. The boards answer "what is actionable today"; this answers "are we
-        winning", which is a different question over a different span - so it is a tab beside
-        them rather than a panel inside one.
-      -->
-      <Tab
-        name="history"
-        label="Alerts over time"
-        :weight="0"
-      >
-        <HistoryPanel />
-      </Tab>
     </Tabbed>
 
     <CredentialsDialog
@@ -411,6 +438,36 @@ whenAgentsReady().then(async() => {
 </template>
 
 <style lang="scss" scoped>
+
+.vuln__switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-right: 4px;
+}
+
+.vuln__switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  padding: 0 12px;
+  height: 40px;
+  cursor: pointer;
+  color: var(--body-text);
+  font-size: 14px;
+
+  &.is-on {
+    background: var(--accent-btn);
+    color: var(--link);
+  }
+
+  & + & {
+    border-left: 1px solid var(--border);
+  }
+}
 // The same measurements as the reports console, on purpose. Two consoles by the same hand
 // should line up when you flip between them.
 .vuln {
