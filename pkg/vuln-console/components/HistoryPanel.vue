@@ -176,17 +176,24 @@ const xTicks = computed(() => {
   const short = dates.value.length <= 80;
   const seen = new Set<string>();
 
-  return dates.value.map((d, i) => ({ d, i })).filter(({ d }) => {
+  // A minimum gap as well as a unit. The window rarely starts on the first of a month, so the
+  // opening bucket and the first month boundary can be a week apart - two labels on top of
+  // each other, which is how 09/25 and 10/25 collided.
+  const MIN_GAP = 34;
+  let lastX = -Infinity;
+
+  return dates.value.map((d, i) => ({ d, i })).filter(({ d, i }) => {
     const key = short ? d.slice(0, 7) : d.slice(0, 4);
 
-    if (seen.has(key)) {
+    if (seen.has(key) || x(i) - lastX < MIN_GAP) {
       return false;
     }
 
     seen.add(key);
+    lastX = x(i);
 
     return true;
-  }).map(({ d, i }) => ({ i, label: short ? d.slice(5, 7) + '/' + d.slice(2, 4) : d.slice(0, 4) }));
+  }).map(({ d, i }) => ({ i, label: short ? `${ d.slice(5, 7) }/${ d.slice(2, 4) }` : d.slice(0, 4) }));
 });
 
 const totalAt = (i: number) => bands.value.reduce((sum, s) => sum + (stacked.value[s]?.[i] || 0), 0);
@@ -315,7 +322,7 @@ const tableHead = computed(() => (mode.value === 'lines' ? lines.value.map((l) =
           <span v-else class="hist__hint">Hover the chart for a week's numbers.</span>
         </div>
 
-        <ul v-if="mode !== 'lines'" class="hist__legend">
+        <ul v-if="mode !== 'lines'" class="hist__legend is-words">
           <li v-for="s in bands" :key="s">
             <i class="hist__swatch" :class="`is-${ s }`" />{{ s }}
           </li>
@@ -631,7 +638,12 @@ const tableHead = computed(() => (mode.value === 'lines' ? lines.value.map((l) =
   margin: 8px 0 0;
   font-size: 12px;
   flex-wrap: wrap;
-  text-transform: capitalize;
+
+  /* Only the severity words. Capitalising the whole legend turned a repository into
+     "Rancher/Prov-Capi-Ui-Extensions", which is not its name. */
+  &.is-words {
+    text-transform: capitalize;
+  }
 }
 
 .hist__toggle {
