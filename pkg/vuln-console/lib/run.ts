@@ -166,6 +166,8 @@ function openingPrompt(
     job.branch ? `  branch         ${ job.branch }` : '',
     job.prNumber ? `  pull request   ${ job.prNumber }` : '',
     alerts.length ? `  open alerts    ${ alerts.join('; ') }` : '',
+    group?.bumpTo ? `  bump to        ${ library }@${ group.bumpTo } - exactly this version, pinned exact` : '',
+    group?.note ? `  board says     ${ group.note }` : '',
     '',
     'Enumerate the affected manifests from the LIVE alerts, not from the list above - this board',
     'can be hours old and a missed lockfile is the most common thing a reviewer catches.',

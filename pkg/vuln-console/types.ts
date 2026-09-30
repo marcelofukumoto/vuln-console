@@ -90,14 +90,29 @@ export interface Snapshot {
   sources?: Record<string, string[]>;
 }
 
-/** How a library stands in one Rancher package's own upstream subtree. */
+/**
+ * How a library that arrives through one Rancher package can be cleared from THIS repository.
+ *
+ * Judged on what a bump would actually install here, not on rancher/dashboard master's
+ * lockfile: master fixes most things with `resolutions` pins, and yarn never applies a
+ * dependency's pins - so "clean on master" said nothing about what a consumer gets.
+ */
 export type UpstreamState =
-  /** Every version that workspace resolves is at or past the patch. */
+  /** Bumping to the package's `target` clears it (refreshing any copy still left in range). */
   | 'fixed'
-  /** That workspace does not pull the library at all any more, so a bump removes it entirely. */
+  /** Bumping to `target` stops pulling the library at all - a fix even with no patch published. */
   | 'gone'
-  /** It still resolves something vulnerable: bumping the package would change nothing. */
+  /** No bump needed: every range pulling a vulnerable copy already admits a patched version. */
+  | 'refresh'
+  /** Rancher clears it only with a `resolutions` pin, which no release carries: pin it here. */
+  | 'pinned'
+  /** Fixed on rancher's master, and no published version carries it yet. */
+  | 'unreleased'
+  /** Rancher's own master still resolves a vulnerable copy. */
   | 'open';
+
+/** The states this repository can act on itself, with a Fix on the row. */
+export const LOCAL_FIX_STATES: UpstreamState[] = ['refresh', 'pinned'];
 
 /** One Rancher package a board depends on, as the gather found it. */
 export interface RancherPackageState {
@@ -105,19 +120,23 @@ export interface RancherPackageState {
   label: string;
   /** What this repository has pinned. */
   version: string;
-  /** The newest version published to the registry. */
+  /** The version tagged `latest` on the registry. */
   latest: string;
+  /** The newest pre-release, when one is newer than `latest`. Absent on older snapshots. */
+  prerelease?: string;
   /**
-   * Whether there is actually something to bump to.
-   *
-   * False means upstream may well have fixed things, but only on its main branch - no release
-   * carries them yet, so a bump would find nothing to change. The board says so instead of
-   * offering a button that cannot work.
+   * The version the group's bump goes to: whichever of `latest` / `prerelease` is newer than
+   * `version` and clears the most, the stable one winning a tie. Empty when neither is newer.
+   * Absent on snapshots written before pre-releases were considered.
    */
+  target?: string;
+  /** Whether there is a newer published version at all. */
   newerRelease: boolean;
   upstreamRepo: string;
-  /** Per library, how it stands in that package's upstream subtree. */
+  /** Per library, how it can be cleared here. */
   upstream: Record<string, UpstreamState>;
+  /** For a `pinned` library, the pin rancher uses, as `"key": "value"`, when it pins it directly. */
+  pins?: Record<string, string>;
   /** Set when the upstream could not be read; every row then reads unknown. */
   error?: string;
 }
@@ -137,9 +156,18 @@ export interface VulnGroup {
    * of its own: a library can come through shell AND through jest, and then both the group's
    * bump and a local override are real options.
    */
-  rancher: { name: string; label: string; state: UpstreamState }[];
+  rancher: { name: string; label: string; state: UpstreamState; pin?: string }[];
   /** True when something other than a Rancher package also reaches it - so it is fixable here. */
   fixableHere: boolean;
+  /**
+   * True when a Fix on this row can clear it in this repository: reached by something other
+   * than a Rancher package, or a Rancher-package path that a lockfile refresh or a pin clears.
+   */
+  localFix: boolean;
+  /** For a group's bump: the exact version to bump the package to. */
+  bumpTo?: string;
+  /** What the board knows about how to fix this, handed to the run as a fact. */
+  note?: string;
 }
 
 export interface Ledger {

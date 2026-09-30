@@ -19,7 +19,8 @@
 //   * A fixed alert is attributed by TIMING alone, for the same reason: a version gate drops
 //     genuine fixes whose title names a lower version than the alert's `patched`.
 
-import type { Alert, Ledger, PullRequest, Severity, Snapshot, VulnGroup } from '../types';
+import { LOCAL_FIX_STATES } from '../types';
+import type { Alert, Ledger, PullRequest, Severity, Snapshot, UpstreamState, VulnGroup } from '../types';
 
 const SEVERITY_ORDER: Severity[] = ['critical', 'high', 'medium', 'low'];
 
@@ -212,15 +213,39 @@ function rancherFor(library: string, snapshot: Snapshot) {
   const packages = snapshot.rancherPackages || [];
   const sources = snapshot.sources?.[library] || [];
   const names = new Set(packages.map((rp) => rp.name));
+  const rancher = packages
+    .filter((rp) => sources.includes(rp.name))
+    .map((rp) => ({
+      name:  rp.name,
+      label: rp.label,
+      state: rp.upstream?.[library] || 'open' as UpstreamState,
+      pin:   rp.pins?.[library],
+      rp,
+    }));
+  // No attribution at all (a board with no Rancher packages, or a library the walk could not
+  // place) is treated as fixable here: that is the board this was before grouping existed,
+  // and refusing a Fix on missing information would hide work rather than describe it.
+  const fixableHere = !sources.length || sources.some((name) => !names.has(name));
+
+  // Said to the run, because the right fix differs by reason and the prompt alone cannot know
+  // it: a refresh needs no pin, and a pin is the only thing that clears a `pinned` row.
+  const notes = rancher.map(({ rp, state, pin }) => {
+    if (state === 'refresh') {
+      return `Through ${ rp.name } ${ rp.version }, every range that pulls a vulnerable copy already admits a patched version: refresh those lockfile entries, no resolutions pin needed.`;
+    }
+
+    if (state === 'pinned') {
+      return `Through ${ rp.name } ${ rp.version }, ${ rp.upstreamRepo } clears it only with a resolutions pin${ pin ? ` (${ pin })` : ', on a parent package' }, and yarn never applies a dependency's resolutions - so no ${ rp.name } release will fix it here. Pin it in this repository's resolutions, scoped to that path.`;
+    }
+
+    return '';
+  }).filter(Boolean);
 
   return {
-    rancher: packages
-      .filter((rp) => sources.includes(rp.name))
-      .map((rp) => ({ name: rp.name, label: rp.label, state: rp.upstream?.[library] || 'open' })),
-    // No attribution at all (a board with no Rancher packages, or a library the walk could not
-    // place) is treated as fixable here: that is the board this was before grouping existed,
-    // and refusing a Fix on missing information would hide work rather than describe it.
-    fixableHere: !sources.length || sources.some((name) => !names.has(name)),
+    rancher:  rancher.map(({ name, label, state, pin }) => ({ name, label, state, pin })),
+    fixableHere,
+    localFix: fixableHere || rancher.some((r) => LOCAL_FIX_STATES.includes(r.state)),
+    ...(notes.length ? { note: notes.join(' ') } : {}),
   };
 }
 

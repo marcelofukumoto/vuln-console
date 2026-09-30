@@ -22,7 +22,10 @@ import { isStalled } from '../lib/run';
 import { elapsedLabel, runPhase } from '../lib/format';
 import { forkFor } from '../config/constants';
 import type { Board } from '../config/constants';
-import type { Job, JobAction, Ledger, Snapshot, VulnGroup } from '../types';
+import { LOCAL_FIX_STATES } from '../types';
+import type {
+  Job, JobAction, Ledger, RancherPackageState, Snapshot, UpstreamState, VulnGroup,
+} from '../types';
 
 const props = defineProps<{ board: Board }>();
 
@@ -69,7 +72,8 @@ function runFor(library: string) {
  *
  *   0  started   a run of ours, or a pull request of ours, already exists
  *   1  fixable   nothing yet, and a fix here would clear it
- *   2  waiting   it arrives through a Rancher package, so the group's bump is the fix
+ *   2  waiting   it arrives through a Rancher package, so the group's bump is the fix (or
+ *                nothing here can fix it yet)
  *   3  no fix    no patched version exists at all
  *
  * The Rancher case is tested before `unfixable` so the row says where the fix belongs rather
@@ -81,7 +85,7 @@ function actionRank(row: VulnGroup, job: Job | null): number {
     return 0;
   }
 
-  if (!row.fixableHere && row.rancher.length) {
+  if (!row.localFix && row.rancher.length) {
     return 2;
   }
 
@@ -146,7 +150,7 @@ const rows = computed(() => {
 
     const groups = [
       ...(row.fixableHere ? [{ label: NOT_RANCHER, state: null }] : []),
-      ...row.rancher.map((r) => ({ label: r.label, state: r.state })),
+      ...row.rancher.map((r) => ({ label: r.label, state: r.state, pin: r.pin })),
     ];
 
     for (const g of groups) {
@@ -157,6 +161,7 @@ const rows = computed(() => {
         groupRank: order.get(g.label) ?? 99,
         // Null in the ungrouped group: the row keeps its own buttons there.
         upstream:  g.state,
+        pin:       'pin' in g ? g.pin : undefined,
       });
     }
   }
@@ -165,14 +170,16 @@ const rows = computed(() => {
 });
 
 /**
- * What a group's single button can do.
+ * The version a group's bump goes to.
  *
- * One button for the whole group, because the fix is one thing: bump that package. It needs
- * both halves to be true - something upstream actually fixed, and a release carrying it.
- * Rancher had fixed fourteen of these on dashboard master while the newest published
- * `@rancher/shell` was the version already installed, so "fixed upstream" on its own would
- * offer a bump that finds nothing to change.
+ * `target` is the gather's answer: the newer of the `latest` and pre-release tags that clears the
+ * most. A snapshot written before pre-releases were considered has no `target`; for that one the
+ * old reading - `latest`, when it is newer - still stands.
  */
+function targetOf(rp: RancherPackageState): string {
+  return rp.target ?? (rp.newerRelease ? rp.latest : '');
+}
+
 /**
  * What the group's button actually sends.
  *
@@ -181,9 +188,13 @@ const rows = computed(() => {
  * this carries the open alerts of every library the bump would clear - which is also the list
  * the agent should verify afterwards - and leaves out the ones it would not, because claiming
  * those would have the run chasing vulnerabilities this bump cannot touch.
+ *
+ * It names the exact version. A pre-release is never reached by "bump to the newest": the
+ * registry's `latest` is still the stable one, and a run left to pick would bump nothing.
  */
 function groupFixRow(label: string): VulnGroup {
   const rp = rancherPackages.value.find((r) => r.label === label);
+  const target = rp ? targetOf(rp) : '';
   const cleared = rows.value.filter((r) => r.group === label && (r.upstream === 'fixed' || r.upstream === 'gone'));
   const vulns = cleared.flatMap((r) => r.vulns).filter((v) => v.state === 'open');
 
@@ -195,9 +206,24 @@ function groupFixRow(label: string): VulnGroup {
     unfixable:   false,
     rancher:     [],
     fixableHere: true,
+    localFix:    true,
+    bumpTo:      target,
+    note:        [
+      `Bump ${ rp?.name } from ${ rp?.version } to exactly ${ target }${ target && target === rp?.prerelease ? ' - a pre-release, which is where these fixes are published; the latest tag does not carry them' : '' }.`,
+      `The board expects it to clear ${ [...new Set(cleared.map((r) => r.library))].join(', ') }.`,
+      'Where a vulnerable copy is left after the bump but its range admits a patched version, refresh that lockfile entry too - that is counted as part of this bump.',
+    ].join(' '),
   };
 }
 
+/**
+ * What a group's heading says, and whether its single button is offered.
+ *
+ * One button for the whole group, because the bump is one act. It needs a version to go to and
+ * at least one row that version clears - judged on what the bump installs HERE, which is not
+ * what rancher/dashboard's own lockfile shows: most of its fixes are `resolutions` pins, and
+ * those never reach a repository that depends on the package.
+ */
 function groupState(label: string) {
   const rp = rancherPackages.value.find((r) => r.label === label);
 
@@ -206,17 +232,50 @@ function groupState(label: string) {
   }
 
   const mine = rows.value.filter((r) => r.group === label);
-  const fixed = mine.filter((r) => r.upstream === 'fixed' || r.upstream === 'gone').length;
+  const cleared = mine.filter((r) => r.upstream === 'fixed' || r.upstream === 'gone').length;
+  const local = mine.filter((r) => LOCAL_FIX_STATES.includes(r.upstream as UpstreamState)).length;
+  const target = targetOf(rp);
+  const summary = [
+    target ? `${ cleared } of ${ mine.length } cleared by ${ target }${ target === rp.prerelease ? ' (pre-release)' : '' }` : '',
+    local ? `${ local } fixable here` : '',
+  ].filter(Boolean).join(' · ');
+  let why = '';
+
+  if (rp.error) {
+    why = `could not work out what a bump would do: ${ rp.error }`;
+  } else if (!target) {
+    why = `${ rp.latest || rp.version } is the newest release and this repository already has it`;
+  } else if (!cleared) {
+    why = `${ target } clears none of these`;
+  }
 
   return {
     rp,
-    fixed,
-    total:   mine.length,
-    canFix:  fixed > 0 && rp.newerRelease,
-    why:     !fixed
-      ? `nothing here is fixed in ${ rp.name } yet`
-      : (rp.newerRelease ? '' : `fixed in ${ rp.upstreamRepo }, but ${ rp.latest } is the newest release and this repository already has it`),
+    target,
+    summary,
+    canFix: cleared > 0 && !!target && !rp.error,
+    why,
   };
+}
+
+/**
+ * What a row under a Rancher package says about itself.
+ *
+ * Each reason is different work. "Fixed on rancher" used to cover three of them - fixed by a
+ * release, fixed on master and not released, and fixed on master only by a pin no release
+ * carries - which is how eight rows read "Already fixed" while bumping cleared two.
+ */
+const UPSTREAM_BADGES: Record<UpstreamState, { status: 'success' | 'info' | 'warning'; label: string; why?: string }> = {
+  fixed:      { status: 'success', label: 'Cleared by the bump' },
+  gone:       { status: 'success', label: 'Cleared by the bump', why: 'no longer pulled in' },
+  refresh:    { status: 'info', label: 'Fixable here', why: 'a lockfile refresh clears it' },
+  pinned:     { status: 'warning', label: 'Pinned on rancher only', why: 'no release carries a pin - pin it here' },
+  unreleased: { status: 'warning', label: 'Fixed on rancher, not released' },
+  open:       { status: 'warning', label: 'Still not fixed on rancher' },
+};
+
+function upstreamBadge(state: UpstreamState) {
+  return UPSTREAM_BADGES[state] || UPSTREAM_BADGES.open;
 }
 
 const headers = [
@@ -358,9 +417,8 @@ onUnmounted(() => {
           <div class="board__group">
             <strong>{{ group.ref }}</strong>
             <template v-if="groupState(group.ref)">
-              <span class="board__group-count">
-                {{ groupState(group.ref).fixed }} of {{ groupState(group.ref).total }} already fixed in
-                {{ groupState(group.ref).rp.upstreamRepo }}
+              <span v-if="groupState(group.ref).summary" class="board__group-count">
+                {{ groupState(group.ref).summary }}
               </span>
               <RcButton
                 v-if="groupState(group.ref).canFix"
@@ -368,7 +426,7 @@ onUnmounted(() => {
                 size="small"
                 @click="emit('act', groupFixRow(group.ref), 'fix')"
               >
-                <span>Bump {{ groupState(group.ref).rp.name }} to {{ groupState(group.ref).rp.latest }}</span>
+                <span>Bump {{ groupState(group.ref).rp.name }} to {{ groupState(group.ref).target }}</span>
               </RcButton>
               <span v-else class="board__group-why">{{ groupState(group.ref).why }}</span>
             </template>
@@ -429,18 +487,24 @@ onUnmounted(() => {
         <template #col:actions="{ row }">
           <td>
             <!--
-              Under a Rancher package a row has no buttons of its own: what it has is a fact
-              about upstream, and the group's single button acts on all of them. The same
-              library under "not related" keeps its buttons, because there the fix IS local.
+              Under a Rancher package a row says how it can be cleared. Cleared by the bump:
+              the group's single button does it. Fixable here or pinned on rancher only: the fix
+              is in this repository, so the row keeps its own buttons. Otherwise there is
+              nothing to do here yet. The same library under "not related" always keeps its
+              buttons, because there the fix IS local.
             -->
             <div v-if="row.upstream" class="board__upstream">
-              <RcStatusBadge :status="row.upstream === 'open' ? 'warning' : 'success'">
-                {{ row.upstream === 'open' ? 'Still not fixed on rancher' : 'Already fixed on rancher' }}
+              <RcStatusBadge :status="upstreamBadge(row.upstream).status">
+                {{ upstreamBadge(row.upstream).label }}
               </RcStatusBadge>
-              <span v-if="row.upstream === 'gone'" class="board__group-why">no longer pulled in</span>
+              <span
+                v-if="upstreamBadge(row.upstream).why"
+                class="board__group-why"
+                :title="row.pin ? `rancher pins it as ${ row.pin }` : undefined"
+              >{{ upstreamBadge(row.upstream).why }}</span>
             </div>
             <StepPills
-              v-else
+              v-if="!row.upstream || LOCAL_FIX_STATES.includes(row.upstream)"
               :row="row"
               :job="row.job"
               :fork="forkFor(board, snapshot?.tokenLogin || '')"
@@ -508,6 +572,11 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     gap: 8px;
+
+    // A row fixable here shows its reason AND its buttons.
+    &:not(:last-child) {
+      margin-bottom: 6px;
+    }
   }
 
   &__run-row td {
