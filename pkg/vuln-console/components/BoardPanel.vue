@@ -10,6 +10,7 @@
 // between boards except the token, because nothing should be - a library called `tmp` in one
 // repository is not the `tmp` in the other.
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import RcButton from '@components/RcButton/RcButton.vue';
 import { RcStatusBadge } from '@components/Pill';
 import CountBox from '@shell/components/CountBox.vue';
 import SortableTable from '@shell/components/SortableTable/index.vue';
