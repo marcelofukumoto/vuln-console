@@ -276,6 +276,14 @@ export async function startAction(options: StartOptions): Promise<Job> {
   }
 
   const previous = (await readJobs(board.id)).find((j) => j.library === library);
+
+  // The library's last conversation is over - this run replaces it - so its pane goes now rather
+  // than idling in the agents pod until job.sh's hour is up (or for ever, if the pod restarted and
+  // brought it back). The transcript stays: ending a conversation keeps it.
+  if (previous?.sessionId) {
+    await api.agent.end(previous.sessionId).catch(() => undefined);
+  }
+
   const now = Date.now();
   const job: Job = {
     board: board.id,

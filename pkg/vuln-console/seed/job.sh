@@ -140,4 +140,32 @@ kube create configmap "$NAME" \
 
 rm -f /tmp/job-$$.json
 
+# A run that has finished lets go of its conversation - an hour later, not now.
+#
+# A finished conversation is still a live claude process in the agents pod, and the Agents
+# extension restores every pane it knows about after a restart. Nothing ended them, so they piled
+# up: fourteen idle panes holding 3.3 GB in a pod with no memory limit, on a single node. Not
+# immediately, because the run is still writing its summary when it records its phase, and
+# somebody may want to open the session and carry on. If a later run has taken the library over,
+# or this one went back to Running, the conversation is left alone.
+PHASE=$(printf '%s' "$UPDATED" | node -e 'let r="";process.stdin.on("data",(c)=>(r+=c)).on("end",()=>{const j=JSON.parse(r);process.stdout.write(`${ j.phase || "" } ${ j.sessionId || "" }`)})')
+SID=${PHASE#* }
+PHASE=${PHASE%% *}
+
+case "$PHASE" in
+  Fixed|Done|Failed|Cancelled)
+    if [ -n "$SID" ] && [ -f /seed/sessions.sh ]; then
+      setsid sh -c '
+        sleep "${VC_END_AFTER:-3600}"
+        now=$(KUBECONFIG=/dev/null kubectl get configmap "$1" -n "$2" -o "jsonpath={.data.job\.json}" 2>/dev/null |
+          node -e "let r=\"\";process.stdin.on(\"data\",(c)=>(r+=c)).on(\"end\",()=>{try{const j=JSON.parse(r);process.stdout.write(j.phase+\" \"+(j.sessionId||\"\"))}catch{}})")
+        case "$now" in
+          "Running "*) exit 0 ;;
+          *" $3") /bin/sh /seed/sessions.sh end "$3" >/dev/null 2>&1 ;;
+        esac
+      ' sh "$NAME" "$NS" "$SID" </dev/null >/dev/null 2>&1 &
+    fi
+    ;;
+esac
+
 echo "job.sh: recorded $*"
