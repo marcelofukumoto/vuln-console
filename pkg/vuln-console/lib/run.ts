@@ -46,13 +46,8 @@ const AGENT_HOME = '/workspace/.home';
 /** Written into the agents pod and run there once the workspace is up. */
 const SETUP_SCRIPT = 'workspace-setup.sh';
 
-/**
- * How long the workspace is given to become usable.
- *
- * A first start is a Bundle render, an image pull, a clone and a yarn install, so minutes rather
- * than seconds. The script waits in the pod; this is the ceiling on that wait.
- */
-const WORKSPACE_READY_MS = 22 * 60 * 1000;
+/** Runs the setup and starts the pane, detached in the agents pod - see startAction. */
+const START_SCRIPT = 'run-start.sh';
 
 const PROMPTS: Record<JobAction, string> = {
   fix:             'fix.prompt.md',
@@ -197,7 +192,7 @@ function openingPrompt(
 async function writeSeed(target: PodRef, workspace: string): Promise<void> {
   // verifying.md is not an action's prompt - it is the shared half that several of them point
   // at, so it goes in alongside them rather than being repeated in each.
-  const wanted = ['job.sh', SETUP_SCRIPT, 'verifying.md', ...Object.values(PROMPTS)];
+  const wanted = ['job.sh', SETUP_SCRIPT, START_SCRIPT, 'verifying.md', ...Object.values(PROMPTS)];
 
   for (const name of wanted) {
     const content = SEED_FILES[name];
@@ -339,71 +334,42 @@ export async function startAction(options: StartOptions): Promise<Job> {
 
     await writeJob(started);
 
-    // The rest in the background: wait for the workspace, give it a credential and a fork, then
-    // attach the pane so the queued prompt is read. A failure here is recorded on the job rather
-    // than thrown, because the caller has already been answered.
-    void (async() => {
-      try {
-        // A Rancher session for the workspace browser. Without it the verification drives a
-        // browser with no session and photographs a login page, which looks like evidence and
-        // is not. Not fatal - a fix that cannot be shown is still a fix - so a failure here is
-        // swallowed and the setup reports which it got.
-        //
-        // Minted by whoever pressed the button, which is no longer the same account the fix is
-        // pushed as: the GitHub token is the installation's. So the screenshots show what the
-        // person looking can see, and the branch belongs to the shared account.
-        await mintRancherToken(`vuln-console ${ board.id } ${ library }`).catch(() => undefined);
+    // A Rancher session for the workspace browser. Without it the verification drives a browser
+    // with no session and photographs a login page, which looks like evidence and is not. Not
+    // fatal - a fix that cannot be shown is still a fix - so a failure here is swallowed and the
+    // setup reports which it got.
+    //
+    // Minted here, by whoever pressed the button, because it needs their Rancher session - the
+    // one thing the agents pod does not have. The screenshots then show what the person looking
+    // can see, while the branch belongs to the installation's GitHub account.
+    await mintRancherToken(`vuln-console ${ board.id } ${ library }`).catch(() => undefined);
 
-        await podRunScript(
-          target,
-          [
-            `sh ${ shellQuote(`${ ROOT }/${ SETUP_SCRIPT }`) }`,
-            shellQuote(workspace),
-            shellQuote(board.repo),
-            shellQuote(fork),
-            shellQuote(GH_TOKEN_KEY),
-            shellQuote(board.id),
-            shellQuote(library),
-            shellQuote(RANCHER_TOKEN_KEY),
-            shellQuote(window.location.origin),
-          ].join(' '),
-          `prepare the workspace for ${ board.repo }`,
-          WORKSPACE_READY_MS,
-        );
-
-        // Start the pane detached, with the shell prefix pointing into the workspace. Without
-        // this nothing attaches until somebody opens the terminal by hand, and the queued prompt
-        // is never read - which is not what pressing a button means.
-        await writeJob({ ...started, stage: 'starting', updatedAt: Date.now() }).catch(() => undefined);
-
-        await podRunScript(
-          target,
-          [
-            `/bin/sh /seed/shell.sh`,
-            shellQuote(session),
-            shellQuote(CONVERSATIONS),
-            shellQuote(AGENT_HOME),
-            'start',
-            shellQuote(`${ ROOT }/shell-${ workspace }.sh`),
-          ].join(' '),
-          'start the conversation in the agent pod',
-          120000,
-        );
-      } catch (e: any) {
-        // Re-read before recording the failure. `started` is a snapshot from before the work
-        // began, and the steps since have written their own stage onto the job - spreading the
-        // snapshot would put the stage back to where it was and report the failure at the wrong
-        // step.
-        const latest = (await readJobs(board.id).catch(() => [])).find((j) => j.library === library);
-
-        await writeJob({
-          ...(latest || started),
-          phase:     'Failed',
-          message:   e?.message || String(e),
-          updatedAt: Date.now(),
-        }).catch(() => undefined);
-      }
-    })();
+    // Everything after this - wait for the workspace, give it a credential and a fork, attach
+    // the pane so the queued prompt is read - runs DETACHED in the agents pod, not in this tab.
+    // It used to be a promise left running in the page, and a run died wherever it stood when
+    // the tab closed or the person navigated away during the minutes a workspace takes to come
+    // up. run-start.sh records every way it ends on the job, so nothing here waits for it.
+    await podRunScript(
+      target,
+      [
+        'setsid sh',
+        shellQuote(`${ ROOT }/${ START_SCRIPT }`),
+        shellQuote(board.id),
+        shellQuote(library),
+        shellQuote(board.repo),
+        shellQuote(workspace),
+        shellQuote(fork),
+        shellQuote(GH_TOKEN_KEY),
+        shellQuote(RANCHER_TOKEN_KEY),
+        shellQuote(window.location.origin),
+        shellQuote(session),
+        shellQuote(CONVERSATIONS),
+        shellQuote(AGENT_HOME),
+        '</dev/null >/dev/null 2>&1 &',
+      ].join(' '),
+      `hand the run to the agent pod for ${ board.repo }`,
+      30000,
+    );
 
     return started;
   } catch (e: any) {
