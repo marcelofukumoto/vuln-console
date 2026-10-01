@@ -48,10 +48,27 @@ sh "$ROOT/workspace-setup.sh" "$WORKSPACE" "$REPO" "$FORK" "$TOKEN_KEY" "$BOARD"
 
 job stage=starting
 
+# A pane somebody else already started has the wrong shell.
+#
+# Attaching a terminal to a conversation whose pane does not exist creates it, through the Agents
+# extension's own shell.sh and without the prefix that routes the agent's commands into the
+# workspace - and `shell.sh ... start` then finds a pane already there and changes nothing. Every
+# command that conversation makes lands in the agents pod. The board no longer attaches early,
+# but a person can (the Agents extension lists every conversation), so a pane found here is
+# replaced: claude-session.sh resumes the same conversation in the new one, now routed.
+TMUX_AS_NODE="setpriv --reuid=1000 --regid=1000 --init-groups env HOME=$AGENT_HOME tmux -f /seed/tmux.conf"
+if $TMUX_AS_NODE has-session -t "mc-$SESSION" 2>/dev/null; then
+  echo "run-start.sh: mc-$SESSION was already started without the workspace shell; restarting it" >> "$LOG"
+  $TMUX_AS_NODE kill-session -t "mc-$SESSION" 2>/dev/null || true
+fi
+
 # The pane, detached, with the shell prefix pointing into the workspace. Without it nothing
 # attaches until somebody opens the terminal by hand, and the queued prompt is never read.
 : > "$ERR"
 /bin/sh /seed/shell.sh "$SESSION" "$CONVERSATIONS" "$AGENT_HOME" start "$ROOT/shell-$WORKSPACE.sh" >> "$LOG" 2>> "$ERR" \
   || fail "start the conversation in the agent pod"
+
+# Only now may a terminal attach: the board's drawer waits for a stage past `starting`.
+job "stage=agent started"
 
 echo "run-start.sh: the agent is started" >> "$LOG"

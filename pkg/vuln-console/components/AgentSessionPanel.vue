@@ -10,13 +10,16 @@
 // state and a keystroke it never published, and it put this extension's conversations in a tab
 // strip meant for theirs. Borrowing the one component they do publish, and framing it in the
 // same Rancher drawer the report opens in, keeps both sides to what they offer each other.
-import { computed, ref } from 'vue';
+import {
+  computed, onMounted, onUnmounted, ref,
+} from 'vue';
 import { Banner } from '@components/Banner';
 import Drawer from '@shell/components/Drawer/Chrome.vue';
 import RcButton from '@components/RcButton/RcButton.vue';
 import AgentTerminal from './AgentTerminal.vue';
 import RunProgress from './RunProgress.vue';
 import { elapsedLabel, runPhase } from '../lib/format';
+import { readJobs } from '../lib/store';
 import type { Job } from '../types';
 
 const props = defineProps<{
@@ -48,17 +51,49 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 const state = ref('');
 
 /**
- * Whether the pane is actually attachable yet.
+ * The job as it is NOW, not as it was when the drawer opened.
  *
- * A session id exists as soon as the conversation is queued, which is immediately - but the pane
- * is only started once the workspace is ready, and attaching before that shows an empty
- * terminal. The stages the run records are what say which it is.
+ * The drawer is opened the moment a button is pressed, with the job as it stood then - before
+ * the workspace is up and long before the pane exists. A frozen copy can never learn that the
+ * pane has started, so it is followed here, the same way the board follows it.
  */
-const paneStarted = computed(() => {
-  const phase = runPhase(props.job);
+const live = ref<Job>(props.job);
+let poll: ReturnType<typeof setInterval> | null = null;
 
-  return phase !== 'workspace' && phase !== 'waiting' && phase !== 'preparing';
+async function refresh(): Promise<void> {
+  const latest = (await readJobs(props.job.board).catch(() => [])).find((j) => j.library === props.job.library);
+
+  // Only this run's record. A later run on the same library is a different conversation.
+  if (latest && latest.sessionId === props.job.sessionId) {
+    live.value = latest;
+  }
+}
+
+onMounted(() => {
+  poll = setInterval(() => refresh().catch(() => undefined), 4000);
 });
+
+onUnmounted(() => {
+  if (poll) {
+    clearInterval(poll);
+  }
+});
+
+/**
+ * Whether the pane may be attached to yet - which is NOT the same as whether it is likely to
+ * exist, and the difference broke every run after the first.
+ *
+ * Attaching a terminal to a conversation whose pane does not exist yet CREATES it, through the
+ * Agents extension's own `shell.sh` - without the shell prefix that routes the agent's commands
+ * into the workspace. run-start.sh's own start then finds a pane already there and leaves it be.
+ * This used to infer "started" from the run's phase, and the phase says `verifying` as soon as a
+ * library has a branch - so Record, Create PR and the rest attached two seconds after the click
+ * and every command those runs made landed in the agents pod. So it waits for the stage
+ * run-start.sh writes only AFTER it has started the pane itself.
+ */
+const EARLY_STAGES = ['workspace', 'waiting', 'preparing', 'starting'];
+
+const paneStarted = computed(() => !(live.value.phase === 'Running' && EARLY_STAGES.includes(live.value.stage || '')));
 </script>
 
 <template>
@@ -87,8 +122,8 @@ const paneStarted = computed(() => {
             come back.
           </Banner>
           <RunProgress
-            :phase="runPhase(job)"
-            :elapsed="elapsedLabel(job)"
+            :phase="runPhase(live)"
+            :elapsed="elapsedLabel(live)"
             :can-open-session="false"
           />
         </div>
