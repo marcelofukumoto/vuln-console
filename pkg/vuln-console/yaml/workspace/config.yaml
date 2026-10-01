@@ -2,7 +2,8 @@
 #
 # No image is ever built for any of this: a stock `node:24` reads its whole behaviour out of
 # this ConfigMap. Editing a script is editing this object, and the pod picks it up on its next
-# start - which is why the Deployment carries a hash of these in its pod template.
+# start - which is why the Deployment carries a hash of these in its pod template (see
+# `@@hash:` in scripts/gen-seed.mjs).
 apiVersion: v1
 kind: ConfigMap
 metadata:

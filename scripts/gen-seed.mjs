@@ -16,6 +16,7 @@
 // Run after editing any of those directories:
 //   yarn gen-seed
 // The output is committed, so a normal build never runs this.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,6 +88,23 @@ const manifests = {};
 
 for (const [name, text] of Object.entries(readDirFiles(yamlDir))) {
   manifests[name] = expandIncludes(text, name);
+}
+
+// `@@hash:<manifest>@@` becomes a digest of that manifest AS EXPANDED - so a Deployment can carry
+// one of its ConfigMap in its pod template. A mounted ConfigMap changes under a running pod, but
+// what read it at boot does not re-read it: the workspace's dev server kept a vue.config from
+// before a fix for as long as the pod lived. A changed digest is a changed pod template, which
+// is a rollout.
+for (const [name, text] of Object.entries(manifests)) {
+  manifests[name] = text.replace(/@@hash:(.+?)@@/g, (_all, target) => {
+    const other = manifests[target.trim()];
+
+    if (other === undefined) {
+      throw new Error(`${ name }: @@hash:${ target }@@ names a manifest that does not exist`);
+    }
+
+    return crypto.createHash('sha256').update(other).digest('hex').slice(0, 16);
+  });
 }
 
 const yamlBody = Object.keys(manifests)

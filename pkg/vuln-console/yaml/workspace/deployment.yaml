@@ -23,6 +23,11 @@ spec:
     metadata:
       labels:
         vuln-console.rancher.io/workspace: ${install}
+      # The workspace ConfigMap's digest, stamped at build time. The scripts are read once at
+      # boot, so a changed script reaches a running workspace only when the pod is replaced -
+      # and this is what replaces it.
+      annotations:
+        vuln-console.rancher.io/config-hash: "@@hash:workspace/config.yaml@@"
     spec:
       serviceAccountName: vuln-workspace
       containers:
