@@ -37,6 +37,23 @@ const base = require(require('path').join(process.cwd(), 'vue.config.js'));
 // runtime works its own base out from the script URL it was loaded from.
 base.publicPath = 'auto';
 
+// http or https, from the proxy path the Deployment was rendered with.
+const proxyScheme = (/\/services\/(https?):/.exec(proxyPath) || [])[1] || 'http';
+
+function serverFor(scheme) {
+  const own = base.devServer || {};
+
+  if (scheme === 'https') {
+    if (own.server || own.https) {
+      return {};
+    }
+
+    return { server: { type: 'https' } };
+  }
+
+  return { server: { type: 'http' } };
+}
+
 const previousChainWebpack = base.chainWebpack;
 const previousSetupMiddlewares = base.devServer && base.devServer.setupMiddlewares;
 
@@ -55,16 +72,25 @@ base.chainWebpack = (webpackConfig) => {
 base.devServer = {
   ...base.devServer,
 
-  // Plain http only behind the proxy, where Rancher terminates TLS and will not talk to the
-  // shell's self-signed dev certificate on the way through.
+  // Behind the proxy, the scheme the BOARD declared - not a fixed one. It is in the proxy path
+  // (`/services/https:<ns>:8005/proxy`), and the startup probe, the proxy and the sidecar
+  // browser all speak it, so the server has to as well. A fixed `http` here was invisible while
+  // rancher/dashboard set its TLS with webpack-dev-server 4's `https` key, which this never
+  // touched; once it moved to v5's `server: { type: 'https', options }`, replacing `server`
+  // turned its dev server into plain http under a probe asking for https. The kubelet then
+  // restarted the workspace every few minutes - 56 times in 14 hours - killing whatever a run
+  // was doing in it, which the run read as running out of memory.
+  //
+  // For https the repository's own `server` is kept, certificate and all, and only filled in
+  // when it has none (or sets TLS the v4 way). For http the repository's TLS is dropped.
   //
   // At its own origin the browser talks to this server directly, and http there is not a smaller
   // problem than a certificate warning, it is a broken login: the shipped proxy sets
   // x-forwarded-proto: https on every request it makes, so Rancher issues its session cookie with
   // Secure, and a browser on http throws that cookie away. What that looks like is a login that
   // returns 200 and a page that bounces straight back to the login form, which is what it did.
-  // So https here, with the shell's own certificate, and a warning to click through once.
-  ...(proxyPath ? { server: { type: 'http' } } : {}),
+  // So https there, with the shell's own certificate, and a warning to click through once.
+  ...(proxyPath ? serverFor(proxyScheme) : {}),
 
   // Requests arrive with whatever Host the proxy chain last set, never this server's own.
   // Without this the proxy answers 'Invalid Host header'.
@@ -165,5 +191,10 @@ base.devServer = {
     overlay: false
   }
 };
+
+// The v4 way of asking for TLS would contradict an http server - and v5 rejects the key outright.
+if (proxyPath && proxyScheme === 'http') {
+  delete base.devServer.https;
+}
 
 module.exports = base;
