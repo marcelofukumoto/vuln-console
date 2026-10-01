@@ -155,6 +155,8 @@ function openingPrompt(
     `are started. The documents in ${ ROOT } (this action's prompt, verifying.md and the others) are`,
     'at that same path on both sides, so `cat` and your file tools both find them. job.sh is the',
     'exception: it lives where you were started, and any command naming its full path is run there.',
+    'Your file-WRITING tools (Write, Edit) act where you were started, not in the workspace - so create',
+    'and change files in the workspace through the shell (a heredoc, `tee`, `sed -i`), never with them.',
     `It works even if nothing else does - if you cannot carry out the action, still record why with it.`,
     '',
     'Facts for this run:',
