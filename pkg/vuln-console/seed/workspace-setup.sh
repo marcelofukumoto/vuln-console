@@ -261,3 +261,46 @@ printf '%s' "$GH_TOKEN" | kube exec -i -n "$NS" "deploy/$NS" -c workspace -- \
   /bin/sh "$WS/.vc-setup.sh"
 
 kube exec -n "$NS" "deploy/$NS" -c workspace -- rm -f "$WS/.vc-setup.sh" >/dev/null 2>&1 || true
+
+# The run's documents - its prompt, verifying.md and the others - at the SAME path inside the
+# workspace as here.
+#
+# The agent runs in this pod but every shell command it runs is tunnelled into the workspace.
+# Its file tools read this pod, its shell reads that one, and nothing guarantees which it uses:
+# a run told to read `/workspace/.vuln-console/fix.prompt.md` did it with `cat`, was told the
+# file does not exist, searched the workspace for it, and gave up - having never started, and
+# with the board still saying Running twelve hours later. With the documents at the same path on
+# both sides, either way of reading them works.
+#
+# Written as root (this exec does not drop to the workspace user) because `/workspace` is at the
+# root of the container's filesystem. Not on a volume, so a pod restart loses it - which is fine,
+# this runs at the start of every run. Each file goes on argv as base64, never on stdin: a
+# `kubectl exec -i` stdin can arrive empty with exit 0. Then the size is checked, because the
+# failure this replaces was silent.
+DOCS=$(cd "$(dirname "$0")" && pwd)
+kube exec -n "$NS" "deploy/$NS" -c workspace -- /bin/sh -c "mkdir -p '$DOCS' && chmod 755 '$DOCS'"
+
+for doc in "$DOCS"/*.md; do
+  [ -f "$doc" ] || continue
+  name=$(basename "$doc")
+  want=$(wc -c < "$doc" | tr -d ' ')
+  b64=$(base64 < "$doc" | tr -d '\n')
+  got=$(kube exec -n "$NS" "deploy/$NS" -c workspace -- /bin/sh -c \
+    "printf %s '$b64' | base64 -d > '$DOCS/$name' && chmod 644 '$DOCS/$name' && wc -c < '$DOCS/$name'" | tr -d ' \r\n')
+  if [ "$got" != "$want" ]; then
+    echo "workspace-setup.sh: $name arrived in the workspace as $got bytes, not $want" >&2
+    exit 5
+  fi
+done
+
+# job.sh is NOT copied: it writes a ConfigMap with this pod's ServiceAccount and needs this pod's
+# kubectl. The shell wrapper runs any command naming its full path HERE instead. What goes in
+# the workspace is a stub that says so, for the one way that can still go wrong - calling it by
+# some other path, where the wrapper cannot recognise it.
+STUB=$(printf '%s\n' '#!/bin/sh' \
+  "echo \"job.sh runs in the agents pod, not in this workspace. Call it by its full path, exactly as written: $DOCS/job.sh <board> <library> field=value ... - a command naming that path is run where it can write the job.\" >&2" \
+  'exit 2' | base64 | tr -d '\n')
+kube exec -n "$NS" "deploy/$NS" -c workspace -- /bin/sh -c \
+  "printf %s '$STUB' | base64 -d > '$DOCS/job.sh' && chmod 755 '$DOCS/job.sh'"
+
+echo "workspace-setup.sh: the run's documents are at $DOCS on both sides"
