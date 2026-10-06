@@ -222,7 +222,7 @@ export async function ensureWorkspace(
     metadata: {
       name,
       labels: {
-        [LABEL_LIBRARY]: library.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 63),
+        [LABEL_LIBRARY]: labelValue(library),
         [LABEL_BOARD]:   board.id,
       },
     },
@@ -271,6 +271,17 @@ export async function workspaceServing(name: string): Promise<boolean> {
   // 502/503/504 is the proxy saying the pod is not there yet, which is the ordinary state for
   // the first several minutes of a workspace's life - not a failure to report.
   return resp.status < 500;
+}
+
+/**
+ * A library name as a label VALUE, which must start and end with a letter or digit.
+ *
+ * Swapping the illegal characters was not enough: a scoped package begins with `@`, so
+ * `@grpc/grpc-js` became `-grpc-grpc-js`, and the apiserver refused the whole workspace - every
+ * scoped library, and the rancher-ai-ui group's `@rancher/shell` bump, failed before a pod existed.
+ */
+export function labelValue(library: string): string {
+  return library.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 63).replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
 }
 
 export async function deleteWorkspace(store: Store, board: string, library: string): Promise<void> {
