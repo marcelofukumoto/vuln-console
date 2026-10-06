@@ -78,7 +78,13 @@ UPDATED=$(CURRENT="$CURRENT" LIBRARY="$LIBRARY" BOARD="$BOARD" node -e '
   //
   // String work only, no filesystem: this script runs in the agent pod, which does not mount
   // the workspace that holds the file.
-  const base = (job.previewUrl || process.env.VULN_PREVIEW_URL || "").replace(/\/+$/, "");
+  //
+  // The ROOT of the proxy path of the workspace, not previewUrl as it stands: a run may record a deep
+  // link there (`.../proxy/home`), and building on that produced `.../proxy/home/vc-artifacts/...`,
+  // which the dev server answers with the app rather than the file.
+  const base = (job.previewUrl || process.env.VULN_PREVIEW_URL || "")
+    .replace(/(\/proxy)(\/.*)?$/, "$1")
+    .replace(/\/+$/, "");
 
   for (const key of ["videoUrl", "infoUrl"]) {
     const value = job[key];
