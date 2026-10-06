@@ -23,7 +23,7 @@
 import { agentProject, agentsApi } from './agents';
 import { podExec, podRunScript, podWriteFile, shellQuote } from './exec';
 import type { PodRef } from './exec';
-import { readJobs, writeJob } from './store';
+import { readJobs, readReviewers, writeJob } from './store';
 import { GH_TOKEN_KEY, RANCHER_TOKEN_KEY, mintRancherToken } from './credentials';
 import { ensureWorkspace, workspaceName, workspaceUrl } from './workspace';
 import type { Store } from './workspace';
@@ -140,6 +140,7 @@ function openingPrompt(
   library: string,
   group: VulnGroup | null,
   job: Job,
+  reviewers: string[] = [],
 ): string {
   const alerts = (group?.vulns || [])
     .filter((v) => v.state === 'open')
@@ -171,6 +172,7 @@ function openingPrompt(
     alerts.length ? `  open alerts    ${ alerts.join('; ') }` : '',
     group?.bumpTo ? `  bump to        ${ library }@${ group.bumpTo } - exactly this version, pinned exact` : '',
     group?.note ? `  board says     ${ group.note }` : '',
+    reviewers.length ? `  reviewers      ${ reviewers.join(', ') } - request review from each on the pull request` : '',
     '',
     'Enumerate the affected manifests from the LIVE alerts, not from the list above - this board',
     'can be hours old and a missed lockfile is the most common thing a reviewer catches.',
@@ -322,6 +324,11 @@ export async function startAction(options: StartOptions): Promise<Job> {
     const workspace = await ensureWorkspace(store, board, fork, library);
     const target = agentTarget(pod);
 
+    // Who the pull request goes to. Stored once for the board (the `reviewers` ConfigMap) and
+    // handed to the run as a fact - the PR prompt has always said to request "the reviewers the
+    // board has selected", and nothing ever told it who they were.
+    const reviewers = action === 'pr' ? (await readReviewers().catch(() => ({ selected: [] as string[] }))).selected : [];
+
     await writeSeed(target, workspace);
 
     // The conversation first, and the workspace afterwards. Starting a conversation only QUEUES
@@ -335,7 +342,7 @@ export async function startAction(options: StartOptions): Promise<Job> {
       // eats the room the library name needs.
       agentProject(`${ workspace }-${ action }`),
       `${ VERBS[action] } ${ library }`,
-      openingPrompt(action, board, fork, prTarget, library, group, { ...job, workspace }),
+      openingPrompt(action, board, fork, prTarget, library, group, { ...job, workspace }, reviewers),
     );
 
     const started: Job = {

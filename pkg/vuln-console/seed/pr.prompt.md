@@ -39,7 +39,16 @@ The fix is made, pushed and verified. Open the pull request for it, and nothing 
    section. Put the verification video's URL **on its own line** — that is what makes GitHub
    render a player rather than a link.
 
-4. Request the reviewers the board has selected, if any are given to you.
+4. Label it `area/dependencies` and request the reviewers you were given (the `reviewers` fact),
+   if any:
+
+   ```
+   gh pr edit <n> --repo <pull requests> --add-label area/dependencies --add-reviewer <login>,<login>
+   ```
+
+   The label is not decoration: rancher/dashboard's "Description" check skips pull requests that
+   carry it, and fails a dependency bump whose body has no checklist. If the label or a reviewer
+   is refused, say which in your message and carry on - the pull request itself is what matters.
 
 5. Record it, including the alert ids this pull request covers — that record is what ties them
    together afterwards, and it beats any guess the board could make from titles:
