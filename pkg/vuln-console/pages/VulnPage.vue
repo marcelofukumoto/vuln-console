@@ -188,8 +188,24 @@ async function refresh(): Promise<void> {
  * the same intention - the reports console works this way and having to hunt for a second
  * button to see your own run is a step nobody wants.
  */
+/**
+ * Holds the tab open while a run is being handed to the agents pod.
+ *
+ * The button's own work - the workspace App, the seed files, the conversation, launching
+ * run-start.sh - happens in this page and takes several seconds, and a tab closed in that window
+ * is a run that never starts: the row sits at "waiting" until the stale timer catches it. After
+ * the hand-off the run lives in the pod and the tab can go. Moving around inside Rancher is fine
+ * either way - this page is a single-page app and the work carries on - so only a real unload is
+ * stopped, and only for those few seconds.
+ */
+function holdTab(event: BeforeUnloadEvent): void {
+  event.preventDefault();
+  event.returnValue = '';
+}
+
 async function act(row: VulnGroup, action: JobAction): Promise<void> {
   error.value = '';
+  window.addEventListener('beforeunload', holdTab);
 
   try {
     const job = await startAction({
@@ -205,10 +221,13 @@ async function act(row: VulnGroup, action: JobAction): Promise<void> {
       by:          principalId.value,
     });
 
+    window.removeEventListener('beforeunload', holdTab);
     await reload();
     watchSession(job);
   } catch (e: any) {
     error.value = e?.message || String(e);
+  } finally {
+    window.removeEventListener('beforeunload', holdTab);
   }
 }
 
