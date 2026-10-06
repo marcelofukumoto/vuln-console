@@ -1,0 +1,7 @@
+plugin/package.json
+plugin/vuln-console-0.23.10.umd.min.186.js
+plugin/vuln-console-0.23.10.umd.min.186.js.map
+plugin/vuln-console-0.23.10.umd.min.870.js
+plugin/vuln-console-0.23.10.umd.min.870.js.map
+plugin/vuln-console-0.23.10.umd.min.js
+plugin/vuln-console-0.23.10.umd.min.js.map
