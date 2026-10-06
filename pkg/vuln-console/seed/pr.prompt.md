@@ -21,11 +21,21 @@ The fix is made, pushed and verified. Open the pull request for it, and nothing 
    fork, the pull request is opened against the upstream, so the head has to name the fork's
    owner or `gh` will look for the branch in the wrong repository and fail:
 
+   Give it the milestone the base branch is currently shipping to, at creation - the one most of
+   the base branch's recent merges carry (on rancher/dashboard master that is the next minor,
+   e.g. `v2.16.0`). Worked out rather than written down, so it moves on by itself after a release:
+
    ```
+   MILESTONE=$(gh pr list --repo <pull requests> --state merged --base <upstream default branch> -L 30 \
+     --json milestone --jq '[.[].milestone.title | select(.)] | group_by(.) | max_by(length) | .[0] // empty')
+
    gh pr create --repo <pull requests> --draft \
      --head <fork owner>:<branch> --base <upstream default branch> \
+     ${MILESTONE:+--milestone "$MILESTONE"} \
      --title "Bump <library> from <old> to <new>" --body-file <file>
    ```
+
+   If the milestone is refused, open it without one and say so in your message.
 
    Title it the way Dependabot does — the board reads the library out of that title, and a title
    it cannot read is a row that loses its pull request.
