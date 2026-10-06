@@ -57,6 +57,25 @@ Then:
 Branch names: `dependabot/npm_and_yarn/multi/<library>` for the first fix, then `<library>-1`,
 `<library>-2`, … — the first name not already in use.
 
+### Leave Dependabot's own pull requests their lockfiles
+
+Dependabot opens one pull request per directory, and the team merges those. A fix of ours that
+bumps the same lockfile duplicates it: whichever merges second is empty or conflicting, and ours
+were closed as superseded for exactly that. So list Dependabot's open pull requests for this
+library and the lockfile each one changes:
+
+```
+gh pr list --repo <pull requests> --state open --author app/dependabot --json number,title,files \
+  --jq '.[] | select(.title | test("^Bump <library> ")) | "\(.number) \([.files[].path] | join(","))"'
+```
+
+- **every affected lockfile is already in one of them** — stand down. Record
+  `phase=Done message="covered by Dependabot pull request(s) <n>, <n>"` and stop; do not branch.
+- **some are** — fix only the OTHER lockfiles, and leave the covered ones (and their
+  package.json) untouched. Name the Dependabot pull requests that cover the rest in your message,
+  and later in the pull request body.
+- **none are** — fix everything, as below.
+
 ## 2. Make the fix
 
 Start from a clean tree on the repository's default branch, then bump the vulnerable dependency
