@@ -142,8 +142,36 @@ mkdir -p "$WS/bin" "$HOME"
 umask 077
 printf 'https://x-access-token:%s@github.com\n' "$TOKEN" > "$WS/.git-credentials"
 git config --global credential.helper "store --file=$WS/.git-credentials"
-git config --global user.name "${GIT_NAME:-Vulnerability Console}"
-git config --global user.email "${GIT_EMAIL:-noreply@rancher.com}"
+
+# Commit as the account that owns the token - the same account that pushes the branch and opens
+# the pull request. A fixed "Vulnerability Console <noreply@rancher.com>" made every fix a commit by
+# nobody, and GitHub carried it onto master as a `Co-authored-by:` trailer on the squash.
+#
+# The email, in order of preference: a verified @suse.com address, the profile's public email, the
+# verified primary, and finally the account's users.noreply.github.com address, which always links
+# a commit to the account even when the token is not allowed to read its emails (no user:email
+# scope - /user/emails answers 404). GIT_NAME / GIT_EMAIL still override all of it.
+IDENTITY=$(TOKEN="$TOKEN" node -e '
+  const h = { Authorization: "Bearer " + process.env.TOKEN, Accept: "application/vnd.github+json", "User-Agent": "vuln-console" };
+  (async () => {
+    const u = await (await fetch("https://api.github.com/user", { headers: h })).json();
+    let verified = [];
+    try {
+      const r = await fetch("https://api.github.com/user/emails", { headers: h });
+      if (r.ok) verified = (await r.json()).filter((e) => e.verified);
+    } catch {}
+    const email = (verified.find((e) => /@suse\.com$/i.test(e.email)) || {}).email ||
+      u.email ||
+      (verified.find((e) => e.primary) || {}).email ||
+      (u.id ? u.id + "+" + u.login + "@users.noreply.github.com" : "");
+    process.stdout.write((u.name || u.login || "") + "\n" + email);
+  })().catch(() => {});
+' 2>/dev/null)
+OWNER_NAME=$(printf '%s\n' "$IDENTITY" | sed -n 1p)
+OWNER_EMAIL=$(printf '%s\n' "$IDENTITY" | sed -n 2p)
+
+git config --global user.name "${GIT_NAME:-${OWNER_NAME:-Vulnerability Console}}"
+git config --global user.email "${GIT_EMAIL:-${OWNER_EMAIL:-noreply@rancher.com}}"
 
 # Never attribute a console fix to the agent. The commits are the human's, pushed to their fork
 # and offered upstream as them.
@@ -240,6 +268,7 @@ git ls-remote --heads fork >/dev/null 2>&1 || {
   exit 4
 }
 
+echo "workspace-setup: committing as $(git config --global user.name) <$(git config --global user.email)>"
 echo "workspace-setup: credential verified, gh $("$WS/bin/gh" --version | head -1 | awk '{print $3}'), fork $FORK, browser $BROWSER_OK, rancher $([ -n "$RANCHER_TOKEN" ] && echo signed-in || echo "no token")"
 INNER_EOF
 
