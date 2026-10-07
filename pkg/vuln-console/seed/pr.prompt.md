@@ -47,7 +47,11 @@ The fix is made, pushed and verified. Open the pull request for it, and nothing 
 3. The body carries: what was bumped and in which manifests, a `### Vulnerabilities fixed`
    section listing each advisory by GHSA id with a full URL, and a `### Screenshot/Video`
    section. Put the verification video's URL **on its own line** — that is what makes GitHub
-   render a player rather than a link.
+   render a player rather than a link. Use the job's `videoUrl` as it is, even though it is only
+   reachable through Rancher: it is swapped for a GitHub attachment afterwards, and a link can be
+   swapped where a sentence cannot. **Never write a placeholder** ("will be attached", "to be
+   attached") - a pull request that says a video is coming, with nothing to come, is how two of
+   ours shipped without one.
 
 4. Label it `area/dependencies` and request the reviewers you were given (the `reviewers` fact),
    if any:
