@@ -99,12 +99,23 @@ when neither an in-range update nor bumping the pinning parent can get there.
    all — root, `shell/`, **`cypress/`**, `storybook/`, `docusaurus/`, `pkg/*`. `cypress/yarn.lock`
    is the commonly missed one.
 
-2. **Each affected major line needs that line's own first patched version.** They differ per
+2. **Pick versions old enough to merge.** The team does not merge a version published less than
+   **14 days ago** (a cooldown, so a fresh release has time to be yanked or flagged first). For each
+   line, take the NEWEST release that is at or past its first patched version AND was published at
+   least 14 days ago - not simply the latest:
+   ```
+   npm view <library> time --json      # each version's publish date
+   ```
+   A basic-ftp fix bumped to 6.2.2 (6 days old) when 6.2.1 (6 weeks old) fixed the same alert, and
+   sat unmergeable for two weeks. Only when no release old enough fixes it, use the first patched
+   version and say in your message that it is held, and until when.
+
+3. **Each affected major line needs that line's own first patched version.** They differ per
    line: one advisory can require `1.1.16` *and* `2.1.2` *and* `5.0.7`, and a lower patch in one
    line can still be vulnerable. Read each alert's `vulnerable_version_range` and
    `first_patched_version`, and confirm the consuming `^x.y` ranges admit what you resolved to.
 
-3. **Introduce no new vulnerable package.** After regenerating, diff each lockfile for *added*
+4. **Introduce no new vulnerable package.** After regenerating, diff each lockfile for *added*
    entries and check every newly added package and version — including a **different** package
    the resolver pulled in (the classic is `braces < 3.0.3`). If the regeneration added a
    vulnerable one, pin it forward, reinstall, and re-diff until the net change adds zero
