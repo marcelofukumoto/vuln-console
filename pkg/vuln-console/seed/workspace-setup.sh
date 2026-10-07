@@ -61,7 +61,11 @@ echo "workspace-setup.sh: waiting for $NS to be usable"
 i=0
 ok=no
 while [ "$i" -lt 240 ]; do
-  if kube exec -n "$NS" "deploy/$NS" -c workspace -- test -d "$WS/src/.git" >/dev/null 2>&1; then
+  # The checkout AND its install. An agent started on a checkout whose yarn install is still
+  # running races it - its own yarn for the bump runs alongside, and the shared node_modules
+  # template is taken from whatever that leaves. `.install-done` is written only once the install
+  # and the template are both finished.
+  if kube exec -n "$NS" "deploy/$NS" -c workspace -- test -f "$WS/src/.install-done" >/dev/null 2>&1; then
     ok=yes
     break
   fi

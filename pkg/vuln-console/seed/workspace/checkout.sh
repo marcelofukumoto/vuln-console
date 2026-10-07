@@ -49,14 +49,25 @@ fi
 
 [ -f .install-done ] || {
   yarn install --mutex "file:$SHARED/yarn/.mutex" --network-timeout 600000
+
+  # The first workspace to install a given lockfile leaves the template for the next one -
+  # taken HERE, from the install that just finished and before `.install-done` says anything
+  # may touch node_modules. It used to be taken after, while an agent was already running yarn
+  # for its bump: the snapshot caught vue half-removed, and two workspaces built from it could
+  # not start a dev server ("Cannot find module 'vue-template-compiler'"). Built under a
+  # temporary name and renamed into place, so a half-made template is never one somebody uses.
+  if [ -n "$HASH" ] && [ -d node_modules ] && [ ! -d "$SHARED/template/$HASH" ]; then
+    TMP_TEMPLATE="$SHARED/template/.$HASH.$$"
+    mkdir -p "$TMP_TEMPLATE"
+    if cp -al node_modules "$TMP_TEMPLATE/node_modules" && [ ! -d "$SHARED/template/$HASH" ]; then
+      mv "$TMP_TEMPLATE" "$SHARED/template/$HASH" || rm -rf "$TMP_TEMPLATE"
+    else
+      rm -rf "$TMP_TEMPLATE"
+    fi
+  fi
+
   touch .install-done
 }
-
-# The first workspace to install a given lockfile leaves the template for the next one.
-if [ -n "$HASH" ] && [ -d node_modules ] && [ ! -d "$SHARED/template/$HASH" ]; then
-  mkdir -p "$SHARED/template/$HASH"
-  cp -al node_modules "$SHARED/template/$HASH/node_modules" || rm -rf "$SHARED/template/$HASH"
-fi
 
 # The injected vue config, copied INTO the checkout.
 #
