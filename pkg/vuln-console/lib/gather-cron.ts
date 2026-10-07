@@ -22,6 +22,19 @@ const NAME = 'vuln-gather';
 const HISTORY_NAME = 'vuln-history';
 
 /**
+ * The janitor: removes finished workspaces, orphaned checkouts and stale node_modules templates.
+ * Its own job and its own ServiceAccount, because it needs things the gather must not have - to
+ * delete workspaces cluster-wide and to see the node's workspace directory.
+ */
+const JANITOR_NAME = 'vuln-janitor';
+
+/** Offset from the gather, which runs on the hour and the half hour. */
+const JANITOR_SCHEDULE = '15,45 * * * *';
+
+/** Where every workspace's checkout lives on the node - the same hostPath the workspaces mount. */
+const WORKSPACES_HOST_PATH = '/var/lib/rancher/vuln-workspaces';
+
+/**
  * Every half hour.
  *
  * The console this replaces re-gathered hourly and called the calls cheap, which they are:
@@ -48,10 +61,12 @@ function steve(path: string, init?: RequestInit): Promise<any> {
 
 /** Create it if it is not there, leave it alone if it is - except the parts that change. */
 async function apply(type: string, name: string, body: Record<string, unknown>, namespace = NAMESPACE): Promise<void> {
-  const existing = await steve(`/${ type }/${ namespace }/${ name }`).catch(() => null);
+  // An empty namespace is a cluster-scoped object, which Steve addresses without one.
+  const path = namespace ? `/${ type }/${ namespace }/${ name }` : `/${ type }/${ name }`;
+  const existing = await steve(path).catch(() => null);
 
   if (existing) {
-    await steve(`/${ type }/${ namespace }/${ name }`, {
+    await steve(path, {
       method: 'PUT',
       body:   JSON.stringify({ ...body, metadata: { ...(body.metadata as object), resourceVersion: existing.metadata?.resourceVersion } }),
     }).catch(() => undefined);
@@ -139,7 +154,7 @@ function rbac(): { type: string; name: string; namespace: string; body: Record<s
 function scriptsBody(): Record<string, unknown> {
   const data: Record<string, string> = {};
 
-  for (const name of ['gather.mjs', 'cron-gather.mjs', 'history.mjs', 'cron-history.mjs']) {
+  for (const name of ['gather.mjs', 'cron-gather.mjs', 'history.mjs', 'cron-history.mjs', 'cron-janitor.mjs']) {
     const content = SEED_FILES[name];
 
     if (!content) {
@@ -272,6 +287,117 @@ function historyCronBody(): Record<string, unknown> {
  * upgrade that adds a board or changes the gather is picked up the first time somebody opens
  * the console rather than needing anybody to remember.
  */
+/**
+ * What the janitor may do: list job records in this extension's namespace, and list and delete
+ * workspace installations. Nothing else - it never sees a Secret.
+ */
+function janitorRbac(): { type: string; name: string; namespace: string; body: Record<string, unknown> }[] {
+  const subject = { kind: 'ServiceAccount', name: JANITOR_NAME, namespace: NAMESPACE };
+
+  return [
+    {
+      type:      'serviceaccount',
+      name:      JANITOR_NAME,
+      namespace: NAMESPACE,
+      body:      { apiVersion: 'v1', kind: 'ServiceAccount', metadata: { name: JANITOR_NAME, namespace: NAMESPACE } },
+    },
+    {
+      type:      'rbac.authorization.k8s.io.role',
+      name:      JANITOR_NAME,
+      namespace: NAMESPACE,
+      body:      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind:       'Role',
+        metadata:   { name: JANITOR_NAME, namespace: NAMESPACE },
+        rules:      [{ apiGroups: [''], resources: ['configmaps'], verbs: ['get', 'list'] }],
+      },
+    },
+    {
+      type:      'rbac.authorization.k8s.io.rolebinding',
+      name:      JANITOR_NAME,
+      namespace: NAMESPACE,
+      body:      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind:       'RoleBinding',
+        metadata:   { name: JANITOR_NAME, namespace: NAMESPACE },
+        roleRef:    { apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name: JANITOR_NAME },
+        subjects:   [subject],
+      },
+    },
+    {
+      type:      'rbac.authorization.k8s.io.clusterrole',
+      name:      JANITOR_NAME,
+      namespace: '',
+      body:      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind:       'ClusterRole',
+        metadata:   { name: JANITOR_NAME },
+        rules:      [{ apiGroups: ['appsplus.io'], resources: ['appinstances'], verbs: ['get', 'list', 'delete'] }],
+      },
+    },
+    {
+      type:      'rbac.authorization.k8s.io.clusterrolebinding',
+      name:      JANITOR_NAME,
+      namespace: '',
+      body:      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind:       'ClusterRoleBinding',
+        metadata:   { name: JANITOR_NAME },
+        roleRef:    { apiGroup: 'rbac.authorization.k8s.io', kind: 'ClusterRole', name: JANITOR_NAME },
+        subjects:   [subject],
+      },
+    },
+  ];
+}
+
+/**
+ * The janitor's CronJob. Root, because a checkout holds files the workspace setup wrote as root;
+ * no privilege escalation and no capabilities beyond what removing files needs.
+ */
+function janitorCronBody(): Record<string, unknown> {
+  return {
+    apiVersion: 'batch/v1',
+    kind:       'CronJob',
+    metadata:   { name: JANITOR_NAME, namespace: NAMESPACE },
+    spec:       {
+      schedule:                   JANITOR_SCHEDULE,
+      concurrencyPolicy:          'Forbid',
+      startingDeadlineSeconds:    300,
+      successfulJobsHistoryLimit: 1,
+      failedJobsHistoryLimit:     3,
+      jobTemplate:                {
+        spec: {
+          backoffLimit: 0,
+          template:     {
+            spec: {
+              serviceAccountName: JANITOR_NAME,
+              restartPolicy:      'Never',
+              containers:         [{
+                name:    'janitor',
+                image:   IMAGE,
+                command: ['node', '/seed/cron-janitor.mjs'],
+                env:     [
+                  { name: 'VULN_NAMESPACE', value: NAMESPACE },
+                  { name: 'WORKSPACES_ROOT', value: '/workspaces' },
+                  { name: 'GRACE_MINUTES', value: '30' },
+                  { name: 'NODE_EXTRA_CA_CERTS', value: '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt' },
+                ],
+                securityContext: { allowPrivilegeEscalation: false, runAsUser: 0 },
+                volumeMounts:    [{ name: 'seed', mountPath: '/seed' }, { name: 'workspaces', mountPath: '/workspaces' }],
+                resources:       { requests: { cpu: '20m', memory: '64Mi' }, limits: { memory: '256Mi' } },
+              }],
+              volumes: [
+                { name: 'seed', configMap: { name: `${ NAME }-scripts` } },
+                { name: 'workspaces', hostPath: { path: WORKSPACES_HOST_PATH, type: 'DirectoryOrCreate' } },
+              ],
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
 export async function ensureGatherCron(boards: Board[]): Promise<void> {
   for (const item of rbac()) {
     await apply(item.type, item.name, item.body, item.namespace);
@@ -280,4 +406,9 @@ export async function ensureGatherCron(boards: Board[]): Promise<void> {
   await apply('configmap', `${ NAME }-scripts`, scriptsBody());
   await apply('batch.cronjob', NAME, cronBody(boards));
   await apply('batch.cronjob', HISTORY_NAME, historyCronBody());
+
+  for (const item of janitorRbac()) {
+    await apply(item.type, item.name, item.body, item.namespace);
+  }
+  await apply('batch.cronjob', JANITOR_NAME, janitorCronBody());
 }
